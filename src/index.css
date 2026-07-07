@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #faf6ee;
+  --color-ink: #4a4458;
+  --color-ink-soft: #8b84a0;
+  --color-mint: #7ad3b2;
+  --color-coral: #f7998f;
+  --color-lavender: #b9aee8;
+  --color-sky: #a8d5e5;
+  --color-butter: #f8dfa8;
+  --font-display: "Georgia", "Times New Roman", serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--color-ink);
+  background: linear-gradient(160deg, #e8e3f5 0%, #f5e8e3 55%, #e3f0ea 100%);
+}
+
+/* Papier-Look für die Zeichenfläche */
+.paper {
+  background-color: var(--color-paper);
+  background-image: radial-gradient(#d8d2c4 1px, transparent 1px);
+  background-size: 24px 24px;
+  box-shadow:
+    0 1px 2px rgba(74, 68, 88, 0.08),
+    0 12px 40px -12px rgba(74, 68, 88, 0.25);
+}
+
+/* Pastell-Verlauf hinter der 3D-Szene */
+.scene-bg {
+  background:
+    radial-gradient(120% 90% at 50% 0%, #f3ecfb 0%, #e8dff2 40%, #d9e6ef 75%, #cfe3e0 100%);
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(45deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(45deg);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  70% {
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s ease-out both;
+}
+
+.animate-pop-in {
+  animation: pop-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.animate-float {
+  animation: float-slow 2.4s ease-in-out infinite;
+}
