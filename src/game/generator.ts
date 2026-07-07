@@ -8,7 +8,7 @@ import {
 } from "./types.ts";
 import { viewDir, viewRight, viewUp, projectedDistance } from "./view.ts";
 import { activeEdgesAtSnap, ACTIVE_TOLERANCE, START_SEPARATION } from "./anamorph.ts";
-import { adjacency, bfsPath, bfsDistances } from "./pathfinding.ts";
+import { adjacency, bfsPath, bfsDistances, planWalk } from "./pathfinding.ts";
 
 export type GenerateResult =
   | { ok: true; level: Level }
@@ -79,7 +79,11 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
   const start = idToIndex.get(sketch.start!)!;
   const goal = idToIndex.get(sketch.goal!)!;
 
-  // Spannbaum per BFS vom Start aus (Reihenfolge = Platzierungsreihenfolge).
+  // Spannbaum per BFS vom ZIEL aus (Reihenfolge = Platzierungsreihenfolge).
+  // Dadurch führt jede Baum-Kante von einem Knoten zu einem Knoten, der dem
+  // Ziel im Gesamtgraphen strikt näher ist — die Figur findet also von jeder
+  // Position aus an irgendeinem Snap-Winkel einen Fortschritts-Zug:
+  // Lösbarkeit per Konstruktion.
   const adj: { to: number; edgeIdx: number }[][] = Array.from({ length: n }, () => []);
   edges.forEach(([a, b], i) => {
     adj[a].push({ to: b, edgeIdx: i });
@@ -88,8 +92,8 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
   const treeOrder: { parent: number; child: number; edgeIdx: number }[] = [];
   {
     const visited = new Array<boolean>(n).fill(false);
-    visited[start] = true;
-    const queue = [start];
+    visited[goal] = true;
+    const queue = [goal];
     while (queue.length) {
       const c = queue.shift()!;
       for (const { to, edgeIdx } of adj[c]) {
@@ -101,14 +105,14 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
     }
   }
 
-  const MAX_ATTEMPTS = 120;
-  let best: { level: Level; violations: number } | null = null;
+  const MAX_ATTEMPTS = 300;
+  let best: { level: Level; score: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const rng = mulberry32(baseSeed * 7919 + attempt * 104729 + 13);
     const positions: Vec3[] = new Array(n);
     const edgeSnapHint = new Array<number>(edges.length).fill(-1);
-    positions[start] = { x: 0, y: 0, z: 0 };
+    positions[goal] = { x: 0, y: 0, z: 0 };
 
     for (const { parent, child, edgeIdx } of treeOrder) {
       // Snap-Winkel 1..7 — die Startansicht (0) bleibt immer "zerfallen".
@@ -142,16 +146,17 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
     }));
 
     const level: Level = { positions: centered, edges, start, goal, edgeSnapHint };
-    const violations = countViolations(level);
-    if (violations === 0) return { ok: true, level };
-    if (!best || violations < best.violations) best = { level, violations };
+
+    // Harte Bedingungen: lösbar und in der Startansicht "zerfallen".
+    if (!isSolvable(level) || !startViewClean(level)) continue;
+
+    const score = softScore(level);
+    if (score === 0) return { ok: true, level };
+    if (!best || score < best.score) best = { level, score };
   }
 
-  // Kein perfekter Versuch: akzeptiere den besten, sofern er lösbar und
-  // in der Startansicht unauffällig ist — sonst Fehler melden.
-  if (best && isSolvable(best.level) && startViewClean(best.level)) {
-    return { ok: true, level: best.level };
-  }
+  // Kein perfekter Versuch: nimm den besten, der die harten Bedingungen erfüllt.
+  if (best) return { ok: true, level: best.level };
   return {
     ok: false,
     reason:
@@ -159,60 +164,100 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
   };
 }
 
-/** Zählt Constraint-Verletzungen eines Platzierungs-Versuchs. */
-function countViolations(level: Level): number {
+/**
+ * Weicher Qualitäts-Score eines Versuchs (0 = perfekt). Die harten
+ * Bedingungen (Lösbarkeit, saubere Startansicht) prüft der Aufrufer.
+ */
+function softScore(level: Level): number {
   let v = 0;
   const { positions, edges, edgeSnapHint } = level;
 
-  // (a) Plattformen dürfen sich in 3D nicht durchdringen.
+  // (a) Plattformen sollen sich in 3D nicht durchdringen — stark gewichtet.
   for (let i = 0; i < positions.length; i++) {
     for (let j = i + 1; j < positions.length; j++) {
-      if (dist3(positions[i], positions[j]) < PLATFORM_SIZE * 1.5) v++;
+      if (dist3(positions[i], positions[j]) < PLATFORM_SIZE * 1.5) v += 8;
     }
   }
 
-  // (b) In der Startansicht (Snap 0) muss jede Kante klar getrennt wirken.
+  // (b) Kanten sollen in der Startansicht mit Sicherheitsmarge getrennt sein.
   for (const [a, b] of edges) {
-    if (projectedDistance(positions[a], positions[b], 0) < START_SEPARATION) v++;
+    if (projectedDistance(positions[a], positions[b], 0) < START_SEPARATION) v += 1;
   }
 
-  // (c) Jede Spannbaum-Kante muss an ihrem Winkel wirklich aktiv sein.
+  // (c) Jede Spannbaum-Kante muss an ihrem Winkel wirklich aktiv sein
+  //     (per Konstruktion erfüllt — Verstoß wäre ein Logikfehler).
   edges.forEach(([a, b], i) => {
     const snap = edgeSnapHint[i];
     if (snap < 0) return;
-    if (projectedDistance(positions[a], positions[b], snap) >= ACTIVE_TOLERANCE) v++;
+    if (projectedDistance(positions[a], positions[b], snap) >= ACTIVE_TOLERANCE) v += 10;
   });
 
   // (d) Unverbundene Plattformen sollen an keinem Snap-Winkel exakt
-  //     übereinander liegen (visuelle Verwechslungsgefahr) — weiches Kriterium.
+  //     übereinander liegen (visuelle Verwechslungsgefahr).
   const connected = new Set(edges.map(([a, b]) => `${Math.min(a, b)}:${Math.max(a, b)}`));
   for (let s = 0; s < SNAP_COUNT; s++) {
     for (let i = 0; i < positions.length; i++) {
       for (let j = i + 1; j < positions.length; j++) {
         if (connected.has(`${i}:${j}`)) continue;
-        if (projectedDistance(positions[i], positions[j], s) < PLATFORM_SIZE * 0.8) v++;
+        if (projectedDistance(positions[i], positions[j], s) < PLATFORM_SIZE * 0.8) v += 1;
       }
     }
   }
 
-  if (!isSolvable(level)) v += 100;
   return v;
 }
 
 /**
- * Lösbarkeitsprüfung: Der Spieler kann zwischen Zügen beliebig rotieren,
- * also ist das Level lösbar, wenn Start und Ziel in der Vereinigung der
- * aktiven Kantenmengen über alle Snap-Winkel verbunden sind.
+ * Lösbarkeitsprüfung gegen die echte Bewegungs-Policy des Spiels:
+ * Die Figur läuft nur Wege, die sie dem Ziel näherbringen (planWalk).
+ * Ein Level ist also erst dann garantiert lösbar, wenn von JEDEM Knoten,
+ * den die Figur so erreichen kann, mindestens ein Snap-Winkel existiert,
+ * an dem planWalk einen Fortschritts-Zug liefert — bis zum Ziel.
+ *
+ * (Die reine Vereinigung aktiver Kanten über alle Winkel wäre zu schwach:
+ * sie erlaubt Pfade, die zwischenzeitlich vom Ziel wegführen, welche die
+ * Figur nie laufen würde — sie könnte in einer Sackgasse stranden.)
  */
 export function isSolvable(level: Level): boolean {
+  const n = level.positions.length;
+
+  // Schneller Vorfilter: ohne Union-Verbindung ist nichts zu holen.
   const union = new Array<boolean>(level.edges.length).fill(false);
+  const masks: boolean[][] = [];
   for (let s = 0; s < SNAP_COUNT; s++) {
-    activeEdgesAtSnap(level, s).forEach((a, i) => {
+    const mask = activeEdgesAtSnap(level, s);
+    masks.push(mask);
+    mask.forEach((a, i) => {
       if (a) union[i] = true;
     });
   }
-  const adj = adjacency(level.positions.length, level.edges, union);
-  return bfsPath(adj, level.start, level.goal) !== null;
+  const unionAdj = adjacency(n, level.edges, union);
+  if (bfsPath(unionAdj, level.start, level.goal) === null) return false;
+
+  const goalDistances = bfsDistances(adjacency(n, level.edges), level.goal);
+
+  // Alle unter der Policy erreichbaren Figuren-Positionen durchspielen.
+  const visited = new Array<boolean>(n).fill(false);
+  visited[level.start] = true;
+  const queue = [level.start];
+  while (queue.length) {
+    const node = queue.shift()!;
+    if (node === level.goal) continue;
+    let canProgress = false;
+    for (const mask of masks) {
+      const path = planWalk(n, level.edges, mask, node, level.goal, goalDistances);
+      if (!path || path.length < 2) continue;
+      canProgress = true;
+      const end = path[path.length - 1];
+      if (!visited[end]) {
+        visited[end] = true;
+        queue.push(end);
+      }
+    }
+    // Sackgasse: Figur kann hier landen, kommt aber nie mehr voran.
+    if (!canProgress) return false;
+  }
+  return true;
 }
 
 /** In der Startansicht darf keine Kante aktiv sein. */
