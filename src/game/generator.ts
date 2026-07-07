@@ -5,10 +5,10 @@ import {
   type Level,
   type Sketch,
   type Vec3,
-} from "./types";
-import { viewDir, viewRight, viewUp, projectedDistance } from "./view";
-import { activeEdgesAtSnap, ACTIVE_TOLERANCE, START_SEPARATION } from "./anamorph";
-import { adjacency, bfsPath, bfsDistances } from "./pathfinding";
+} from "./types.ts";
+import { viewDir, viewRight, viewUp, projectedDistance } from "./view.ts";
+import { activeEdgesAtSnap, ACTIVE_TOLERANCE, START_SEPARATION } from "./anamorph.ts";
+import { adjacency, bfsPath, bfsDistances } from "./pathfinding.ts";
 
 export type GenerateResult =
   | { ok: true; level: Level }

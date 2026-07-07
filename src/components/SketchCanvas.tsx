@@ -27,9 +27,11 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
 
   useEffect(() => {
     const wrap = wrapRef.current!;
-    const ro = new ResizeObserver(() => {
-      setSize({ w: wrap.clientWidth, h: wrap.clientHeight });
-    });
+    const measure = () => setSize({ w: wrap.clientWidth, h: wrap.clientHeight });
+    // sofort messen — ResizeObserver feuert erst mit den Rendering-Steps
+    // (in Hintergrund-Tabs u.U. gar nicht)
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(wrap);
     return () => ro.disconnect();
   }, []);
@@ -172,7 +174,11 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
 
   const handleDown = (e: React.PointerEvent) => {
     e.preventDefault();
-    canvasRef.current!.setPointerCapture(e.pointerId);
+    try {
+      canvasRef.current!.setPointerCapture(e.pointerId);
+    } catch {
+      // synthetische Events ohne aktiven Pointer — Capture ist optional
+    }
     const { x, y } = pointerPos(e);
     const hit = nodeAt(x, y);
 
@@ -180,6 +186,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       if (hit) {
         setDrag({ from: hit.id, x, y });
       } else {
+        if (size.w === 0 || size.h === 0) return;
         if (sketch.nodes.length >= MAX_NODES) {
           onNotice(`Maximal ${MAX_NODES} Plattformen — radiere erst etwas weg.`);
           return;

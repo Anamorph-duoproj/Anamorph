@@ -1,4 +1,4 @@
-import type { ExampleSketch, Sketch } from "./types";
+import type { ExampleSketch, Sketch } from "./types.ts";
 
 function sketch(
   coords: [number, number][],

@@ -1,4 +1,4 @@
-import { BASE_PITCH, SNAP_COUNT, type Vec3 } from "./types";
+import { BASE_PITCH, SNAP_COUNT, type Vec3 } from "./types.ts";
 
 /** Yaw-Winkel (rad) für einen Snap-Index. */
 export function snapYaw(index: number): number {

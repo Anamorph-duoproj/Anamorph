@@ -240,7 +240,11 @@ export default function GameScene({ level, onWin }: Props) {
       startY = e.clientY;
       yaw0 = targetYaw;
       pitch0 = targetPitch;
-      el.setPointerCapture(e.pointerId);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetische Events ohne aktiven Pointer — Capture ist optional
+      }
     };
     const onMove = (e: PointerEvent) => {
       if (!pointerDown || walkPath) return;
@@ -277,8 +281,31 @@ export default function GameScene({ level, onWin }: Props) {
       registerSnap();
     };
 
+    if (import.meta.env.DEV) {
+      (window as any).__anamorph = {
+        rotate: (d: 1 | -1) => rotateByRef.current(d),
+        walk: () => tryWalk(),
+        state: () => ({
+          yaw,
+          targetYaw,
+          pitch,
+          walking: !!walkPath,
+          active: activeMask,
+          currentNode,
+          goal: level.goal,
+        }),
+      };
+    }
+
     // --- Render-Loop ----------------------------------------------------------
+    // RAF pausiert in versteckten Tabs — dann übernimmt ein setTimeout-Fallback,
+    // damit die Simulation (Kamera, Figur) konsistent weiterläuft.
     let raf = 0;
+    let timer = 0;
+    const schedule = () => {
+      if (document.hidden) timer = window.setTimeout(() => tick(performance.now()), 33);
+      else raf = requestAnimationFrame(tick);
+    };
     let prev = performance.now();
     const startTime = prev;
     let lastLabel = "";
@@ -368,12 +395,13 @@ export default function GameScene({ level, onWin }: Props) {
       }
 
       renderer.render(scene, camera);
-      raf = requestAnimationFrame(tick);
+      schedule();
     };
-    raf = requestAnimationFrame(tick);
+    schedule();
 
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
       ro.disconnect();
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);

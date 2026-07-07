@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { PLATFORM_SIZE, type Level, type Vec3 } from "./types";
-import { projectedDistance } from "./view";
+import { PLATFORM_SIZE, type Level, type Vec3 } from "./types.ts";
+import { projectedDistance } from "./view.ts";
 
 /**
  * Toleranz (in Weltkoordinaten der Bildebene), unterhalb derer zwei
