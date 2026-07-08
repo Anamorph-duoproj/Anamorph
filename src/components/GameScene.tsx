@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import {
-  BASE_PITCH,
-  PLATFORM_SIZE,
-  SNAP_COUNT,
-  type Level,
-} from "../game/types";
+import { BASE_PITCH, PLATFORM_SIZE, SNAP_COUNT, type Level } from "../game/types";
 import { activeEdgesForCamera } from "../game/anamorph";
 import { adjacency, bfsDistances, planWalk } from "../game/pathfinding";
 
@@ -38,7 +33,7 @@ export default function GameScene({ level, onWin }: Props) {
   const onWinRef = useRef(onWin);
   onWinRef.current = onWin;
 
-  const [viewLabel, setViewLabel] = useState("Ansicht 1/8");
+  const [viewLabel, setViewLabel] = useState("View 1/8");
   const [activeCount, setActiveCount] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
   const [walking, setWalking] = useState(false);
@@ -48,7 +43,6 @@ export default function GameScene({ level, onWin }: Props) {
     const mount = mountRef.current!;
     const n = level.positions.length;
 
-    // --- Renderer & Kamera -------------------------------------------------
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
@@ -74,7 +68,6 @@ export default function GameScene({ level, onWin }: Props) {
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    // --- Szene --------------------------------------------------------------
     const scene = new THREE.Scene();
     scene.add(new THREE.AmbientLight(0xffffff, 0.75));
     const sun = new THREE.DirectionalLight(0xfff2df, 1.1);
@@ -97,12 +90,11 @@ export default function GameScene({ level, onWin }: Props) {
       const mesh = new THREE.Mesh(platformGeo, mat);
       const p = level.positions[i];
       mesh.position.set(p.x, p.y, p.z);
-      mesh.scale.setScalar(0.001); // Aufbau-Animation
+      mesh.scale.setScalar(0.001);
       scene.add(mesh);
       platforms.push(mesh);
     }
 
-    // Ziel-Markierung: pulsierender Ring + kleiner Kegel
     const goalPos = level.positions[level.goal];
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(PLATFORM_SIZE * 0.42, 0.045, 12, 40),
@@ -118,7 +110,6 @@ export default function GameScene({ level, onWin }: Props) {
     beacon.position.set(goalPos.x, goalPos.y + PLATFORM_HEIGHT / 2 + 0.5, goalPos.z);
     scene.add(beacon);
 
-    // Brücken: sichtbar nur, wenn die Kante aus der aktuellen Sicht "aktiv" ist
     const topOf = (i: number) =>
       new THREE.Vector3(
         level.positions[i].x,
@@ -146,7 +137,6 @@ export default function GameScene({ level, onWin }: Props) {
       return mesh;
     });
 
-    // Figur: schlichter Spielstein (Körper + Kopf)
     const figure = new THREE.Group();
     const body = new THREE.Mesh(
       new THREE.CylinderGeometry(0.13, 0.19, 0.4, 16),
@@ -165,7 +155,6 @@ export default function GameScene({ level, onWin }: Props) {
     let currentNode = level.start;
     figure.position.copy(figureBase(currentNode));
 
-    // --- Kamera-Rotation mit Snapping ---------------------------------------
     let yaw = 0;
     let pitch = BASE_PITCH;
     let targetYaw = 0;
@@ -195,7 +184,6 @@ export default function GameScene({ level, onWin }: Props) {
       }
     };
 
-    // --- Figur-Bewegung ------------------------------------------------------
     const fullAdj = adjacency(n, level.edges);
     const goalDistances = bfsDistances(fullAdj, level.goal);
     let walkPath: number[] | null = null;
@@ -210,8 +198,8 @@ export default function GameScene({ level, onWin }: Props) {
       if (!path || path.length < 2) {
         setHint(
           activeMask.some(Boolean)
-            ? "Von hier führt gerade kein aktiver Weg weiter — drehe die Struktur."
-            : "Keine Verbindung aktiv — drehe die Struktur, bis Plattformen zusammenrücken."
+            ? "No active path continues from here. Rotate the structure."
+            : "No connection is active. Rotate until platforms line up."
         );
         window.setTimeout(() => setHint(null), 2600);
         return;
@@ -223,7 +211,6 @@ export default function GameScene({ level, onWin }: Props) {
       setWalking(true);
     };
 
-    // --- Eingabe -------------------------------------------------------------
     let pointerDown = false;
     let moved = false;
     let startX = 0;
@@ -243,7 +230,7 @@ export default function GameScene({ level, onWin }: Props) {
       try {
         el.setPointerCapture(e.pointerId);
       } catch {
-        // synthetische Events ohne aktiven Pointer — Capture ist optional
+        // Pointer capture is optional for synthetic events.
       }
     };
     const onMove = (e: PointerEvent) => {
@@ -263,7 +250,6 @@ export default function GameScene({ level, onWin }: Props) {
       if (!moved) {
         tryWalk();
       } else {
-        // sanftes Snapping auf die 8 Blickwinkel + Basis-Pitch
         targetYaw = Math.round(targetYaw / SNAP_STEP) * SNAP_STEP;
         targetPitch = BASE_PITCH;
         registerSnap();
@@ -297,9 +283,6 @@ export default function GameScene({ level, onWin }: Props) {
       };
     }
 
-    // --- Render-Loop ----------------------------------------------------------
-    // RAF pausiert in versteckten Tabs — dann übernimmt ein setTimeout-Fallback,
-    // damit die Simulation (Kamera, Figur) konsistent weiterläuft.
     let raf = 0;
     let timer = 0;
     const schedule = () => {
@@ -316,20 +299,17 @@ export default function GameScene({ level, onWin }: Props) {
       prev = now;
       const elapsed = (now - startTime) / 1000;
 
-      // Aufbau-Animation der Plattformen
       platforms.forEach((m, i) => {
         const t = Math.min(1, Math.max(0, (elapsed - i * 0.07) / 0.45));
         if (t < 1) m.scale.setScalar(Math.max(0.001, easeOutBack(t)));
         else m.scale.setScalar(1);
       });
 
-      // Kamera weich zum Ziel führen
       const k = 1 - Math.exp(-dt * 9);
       yaw += (targetYaw - yaw) * k;
       pitch += (targetPitch - pitch) * k;
       placeCamera();
 
-      // Anamorphose-Check: Bildschirmprojektion aller Kanten
       camera.updateMatrixWorld();
       activeMask = activeEdgesForCamera(
         level,
@@ -344,16 +324,14 @@ export default function GameScene({ level, onWin }: Props) {
         (b.material as THREE.MeshBasicMaterial).opacity = pulse;
       });
 
-      // Ziel-Ring pulsieren lassen
       const rs = 1 + 0.12 * Math.sin(elapsed * 3);
       ring.scale.setScalar(rs);
       beacon.rotation.y = elapsed * 1.5;
 
-      // HUD nur bei Änderungen aktualisieren
       const atSnap =
         Math.abs(yaw - Math.round(yaw / SNAP_STEP) * SNAP_STEP) < 0.02 &&
         Math.abs(pitch - BASE_PITCH) < 0.02;
-      const label = atSnap ? `Ansicht ${snapIdxOf(yaw) + 1}/${SNAP_COUNT}` : "freie Drehung…";
+      const label = atSnap ? `View ${snapIdxOf(yaw) + 1}/${SNAP_COUNT}` : "free rotation...";
       if (label !== lastLabel) {
         lastLabel = label;
         setViewLabel(label);
@@ -364,7 +342,6 @@ export default function GameScene({ level, onWin }: Props) {
         setActiveCount(ac);
       }
 
-      // Figur entlang des geplanten Pfads bewegen
       if (walkPath) {
         const a = figureBase(walkPath[walkSeg]);
         const b = figureBase(walkPath[walkSeg + 1]);
@@ -372,7 +349,7 @@ export default function GameScene({ level, onWin }: Props) {
         walkT += (dt * 2.6) / Math.max(0.6, segLen);
         const t = Math.min(1, walkT);
         figure.position.lerpVectors(a, b, t);
-        figure.position.y += Math.sin(t * Math.PI) * 0.28; // kleiner Hüpfer
+        figure.position.y += Math.sin(t * Math.PI) * 0.28;
         const dir = b.clone().sub(a);
         if (dir.lengthSq() > 1e-6) figure.rotation.y = Math.atan2(dir.x, dir.z);
         if (t >= 1) {
@@ -389,7 +366,6 @@ export default function GameScene({ level, onWin }: Props) {
           }
         }
       } else {
-        // Idle: sanftes Atmen
         figure.position.copy(figureBase(currentNode));
         figure.scale.y = 1 + 0.03 * Math.sin(elapsed * 2.2);
       }
@@ -424,17 +400,16 @@ export default function GameScene({ level, onWin }: Props) {
     <div className="relative h-full w-full">
       <div ref={mountRef} className="scene-bg h-full w-full overflow-hidden" />
 
-      {/* HUD */}
       <div className="pointer-events-none absolute inset-x-0 top-3 flex items-start justify-center gap-2 px-3">
         <div className="animate-fade-up flex items-center gap-2 rounded-full bg-white/75 px-4 py-2 text-sm font-medium shadow-sm backdrop-blur">
           <span>{viewLabel}</span>
-          <span className="opacity-40">·</span>
+          <span className="opacity-40">/</span>
           <span className={activeCount > 0 ? "text-emerald-600" : "opacity-60"}>
             {activeCount === 0
-              ? "kein Weg aktiv"
+              ? "no active path"
               : activeCount === 1
-                ? "1 Weg aktiv"
-                : `${activeCount} Wege aktiv`}
+                ? "1 active path"
+                : `${activeCount} active paths`}
           </span>
         </div>
       </div>
@@ -449,21 +424,21 @@ export default function GameScene({ level, onWin }: Props) {
           <button
             onClick={() => rotateByRef.current(-1)}
             disabled={walking}
-            className="h-12 w-12 rounded-full bg-white/80 text-xl shadow backdrop-blur transition hover:bg-white disabled:opacity-40"
-            aria-label="Nach links drehen"
+            className="h-12 w-16 rounded-full bg-white/80 text-sm font-medium shadow backdrop-blur transition hover:bg-white disabled:opacity-40"
+            aria-label="Rotate left"
           >
-            ↶
+            Left
           </button>
           <span className="rounded-full bg-white/60 px-4 py-1.5 text-xs backdrop-blur sm:text-sm">
-            {walking ? "Figur läuft…" : "Ziehen = drehen · Tippen = laufen"}
+            {walking ? "Figure walking..." : "Drag to rotate / Tap to move"}
           </span>
           <button
             onClick={() => rotateByRef.current(1)}
             disabled={walking}
-            className="h-12 w-12 rounded-full bg-white/80 text-xl shadow backdrop-blur transition hover:bg-white disabled:opacity-40"
-            aria-label="Nach rechts drehen"
+            className="h-12 w-16 rounded-full bg-white/80 text-sm font-medium shadow backdrop-blur transition hover:bg-white disabled:opacity-40"
+            aria-label="Rotate right"
           >
-            ↷
+            Right
           </button>
         </div>
       </div>

@@ -35,7 +35,6 @@ export default function App() {
       return;
     }
     setPhase("morphing");
-    // kurze Verwandlungs-Sequenz: "deine Zeichnung wird Welt"
     window.setTimeout(() => {
       const result = generateLevel(sketch, Date.now() % 100000);
       if (!result.ok) {
@@ -59,28 +58,28 @@ export default function App() {
 
   const replay = () => {
     setWinStats(null);
-    setLevelKey((k) => k + 1); // Szene neu mounten: Figur zurück auf Start
+    setLevelKey((k) => k + 1);
   };
 
   return (
     <div className="flex h-full flex-col">
-      {/* Kopfzeile */}
-      <header className="flex items-center justify-between px-5 py-3 sm:px-8">
-        <div className="flex items-baseline gap-3">
-          <h1
-            className="text-2xl font-semibold tracking-wide"
-            style={{ fontFamily: "Georgia, serif" }}
-          >
-            Anamorph
-          </h1>
-          <span className="hidden text-sm opacity-60 sm:inline">
-            Deine Zeichnung wird Welt.
-          </span>
+      <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-8">
+        <div className="flex min-w-0 items-center gap-3">
+          <img
+            src="/assets/icon.webp"
+            alt=""
+            className="brand-mark h-11 w-11 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
+          />
+          <img
+            src="/assets/wordmark-header.png"
+            alt="Anamorph"
+            className="brand-wordmark min-w-0 object-contain"
+          />
         </div>
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex shrink-0 items-center gap-3 text-sm">
           {solved > 0 && (
             <span className="rounded-full bg-white/60 px-3 py-1 backdrop-blur">
-              ✦ {solved} gelöst
+              Solved: {solved}
             </span>
           )}
           {phase === "play" && (
@@ -88,19 +87,18 @@ export default function App() {
               onClick={() => backToDraw(false)}
               className="rounded-full bg-white/70 px-4 py-1.5 font-medium shadow-sm backdrop-blur transition hover:bg-white"
             >
-              ← Skizze bearbeiten
+              Edit sketch
             </button>
           )}
         </div>
       </header>
 
-      {/* Hauptbereich */}
       <main className="relative min-h-0 flex-1">
         {phase === "draw" && (
           <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 px-4 pb-4 sm:px-6">
             <SketchCanvas sketch={sketch} onChange={setSketch} onNotice={notice} />
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm opacity-60">Beispiele:</span>
+              <span className="text-sm opacity-60">Examples:</span>
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex.name}
@@ -124,7 +122,7 @@ export default function App() {
                     : { background: "linear-gradient(135deg, #8d7bd8, #5fa8c9)" }
                 }
               >
-                In 3D verwandeln ✦
+                Transform to 3D
               </button>
             </div>
             {validation && sketch.nodes.length > 0 && (
@@ -135,12 +133,13 @@ export default function App() {
 
         {phase === "morphing" && (
           <div className="flex h-full flex-col items-center justify-center gap-6">
-            <div
-              className="animate-float h-16 w-16 rounded-lg shadow-xl"
-              style={{ background: "linear-gradient(135deg, #b9aee8, #7ad3b2)" }}
+            <img
+              src="/assets/icon.webp"
+              alt=""
+              className="animate-float-soft h-20 w-20 rounded-xl object-cover shadow-xl"
             />
             <p className="animate-fade-up text-lg" style={{ fontFamily: "Georgia, serif" }}>
-              Deine Zeichnung wird Welt…
+              Building your world...
             </p>
           </div>
         )}
@@ -156,44 +155,42 @@ export default function App() {
           />
         )}
 
-        {/* Sieg-Overlay */}
         {winStats && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/40 backdrop-blur-sm">
             <div className="animate-pop-in mx-4 flex max-w-sm flex-col items-center gap-4 rounded-3xl bg-white/90 px-8 py-8 text-center shadow-2xl">
-              <div className="text-5xl">✦</div>
+              <img src="/assets/icon.webp" alt="" className="h-20 w-20 rounded-xl object-cover shadow" />
               <h2 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, serif" }}>
-                Gelöst!
+                Solved
               </h2>
               <p className="text-sm opacity-70">
-                {winStats.moves} {winStats.moves === 1 ? "Zug" : "Züge"} ·{" "}
-                {winStats.rotations} {winStats.rotations === 1 ? "Drehung" : "Drehungen"}
+                {winStats.moves} {winStats.moves === 1 ? "move" : "moves"} /{" "}
+                {winStats.rotations} {winStats.rotations === 1 ? "rotation" : "rotations"}
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   onClick={replay}
                   className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
                 >
-                  Nochmal spielen
+                  Play again
                 </button>
                 <button
                   onClick={() => backToDraw(false)}
                   className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
                 >
-                  Skizze ändern
+                  Edit sketch
                 </button>
                 <button
                   onClick={() => backToDraw(true)}
                   className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow transition hover:scale-105"
                   style={{ background: "linear-gradient(135deg, #8d7bd8, #5fa8c9)" }}
                 >
-                  Neue Skizze ✏️
+                  New sketch
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Hinweis-Toast */}
         {toast && (
           <div className="pointer-events-none absolute inset-x-0 top-4 z-30 flex justify-center px-4">
             <div className="animate-pop-in rounded-xl bg-white/90 px-5 py-2.5 text-sm shadow-lg backdrop-blur">
