@@ -8,10 +8,41 @@ import type { Level, Sketch } from "./game/types";
 type Phase = "draw" | "morphing" | "play";
 
 const EMPTY_SKETCH: Sketch = { nodes: [], edges: [], start: null, goal: null };
+const TUTORIAL_KEY = "anamorph.tutorialDone";
+const HISTORY_LIMIT = 64;
+
+interface SketchHistory {
+  past: Sketch[];
+  present: Sketch;
+  future: Sketch[];
+}
+
+const TUTORIAL_STEPS = [
+  "Tap the paper to place platforms. You need at least two.",
+  "Drag from one platform to another to draw a path.",
+  "Select the Start and Goal tools, then tap a platform to mark each.",
+  "Press \"Transform to 3D\". Then rotate the structure until paths line up and tap to walk.",
+];
+
+function tutorialStepFor(sketch: Sketch): number {
+  if (sketch.nodes.length < 2) return 0;
+  if (sketch.edges.length < 1) return 1;
+  if (sketch.start === null || sketch.goal === null) return 2;
+  return 3;
+}
 
 export default function App() {
+  const firstVisit = useRef(localStorage.getItem(TUTORIAL_KEY) !== "1");
+  const [tutorialActive, setTutorialActive] = useState(firstVisit.current);
   const [phase, setPhase] = useState<Phase>("draw");
-  const [sketch, setSketch] = useState<Sketch>(EXAMPLES[0].sketch);
+  const [history, setHistory] = useState<SketchHistory>({
+    past: [],
+    // First-time visitors start on a blank sheet so the tutorial can guide
+    // them through drawing; returning players get an example preloaded.
+    present: firstVisit.current ? EMPTY_SKETCH : EXAMPLES[0].sketch,
+    future: [],
+  });
+  const sketch = history.present;
   const [level, setLevel] = useState<Level | null>(null);
   const [levelKey, setLevelKey] = useState(0);
   const [solved, setSolved] = useState(0);
@@ -26,6 +57,65 @@ export default function App() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  const updateSketch = useCallback((next: Sketch) => {
+    setHistory((h) => ({
+      past: [...h.past, h.present].slice(-HISTORY_LIMIT),
+      present: next,
+      future: [],
+    }));
+  }, []);
+
+  const undo = useCallback(() => {
+    setHistory((h) => {
+      if (h.past.length === 0) return h;
+      return {
+        past: h.past.slice(0, -1),
+        present: h.past[h.past.length - 1],
+        future: [h.present, ...h.future],
+      };
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setHistory((h) => {
+      if (h.future.length === 0) return h;
+      return {
+        past: [...h.past, h.present].slice(-HISTORY_LIMIT),
+        present: h.future[0],
+        future: h.future.slice(1),
+      };
+    });
+  }, []);
+
+  // Undo/redo keyboard shortcuts while drawing.
+  useEffect(() => {
+    if (phase !== "draw") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (k === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase, undo, redo]);
+
+  const dismissTutorial = useCallback(() => {
+    localStorage.setItem(TUTORIAL_KEY, "1");
+    setTutorialActive(false);
+  }, []);
+
+  const restartTutorial = () => {
+    localStorage.removeItem(TUTORIAL_KEY);
+    setTutorialActive(true);
+  };
 
   const validation = validateSketch(sketch);
 
@@ -42,6 +132,7 @@ export default function App() {
         setPhase("draw");
         return;
       }
+      if (tutorialActive) dismissTutorial();
       setLevel(result.level);
       setLevelKey((k) => k + 1);
       setWinStats(null);
@@ -50,7 +141,7 @@ export default function App() {
   };
 
   const backToDraw = (fresh: boolean) => {
-    if (fresh) setSketch(EMPTY_SKETCH);
+    if (fresh) updateSketch(EMPTY_SKETCH);
     setWinStats(null);
     setLevel(null);
     setPhase("draw");
@@ -60,6 +151,8 @@ export default function App() {
     setWinStats(null);
     setLevelKey((k) => k + 1);
   };
+
+  const tutorialStep = tutorialStepFor(sketch);
 
   return (
     <div className="flex h-full flex-col">
@@ -82,6 +175,14 @@ export default function App() {
               Solved: {solved}
             </span>
           )}
+          {phase === "draw" && !tutorialActive && (
+            <button
+              onClick={restartTutorial}
+              className="rounded-full bg-white/70 px-4 py-1.5 font-medium shadow-sm backdrop-blur transition hover:bg-white"
+            >
+              Tutorial
+            </button>
+          )}
           {phase === "play" && (
             <button
               onClick={() => backToDraw(false)}
@@ -96,14 +197,53 @@ export default function App() {
       <main className="relative min-h-0 flex-1">
         {phase === "draw" && (
           <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 px-4 pb-4 sm:px-6">
-            <SketchCanvas sketch={sketch} onChange={setSketch} onNotice={notice} />
+            {tutorialActive && (
+              <div className="animate-fade-up flex items-center gap-3 rounded-2xl bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
+                <div className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
+                  {TUTORIAL_STEPS.map((_, i) => (
+                    <span
+                      key={i}
+                      className="h-2 w-2 rounded-full transition-colors"
+                      style={{
+                        backgroundColor: i < tutorialStep
+                          ? "#7ad3b2"
+                          : i === tutorialStep
+                            ? "#8d7bd8"
+                            : "rgba(74,68,88,0.18)",
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="min-w-0 flex-1 text-sm">
+                  <span className="font-semibold">
+                    Step {tutorialStep + 1}/{TUTORIAL_STEPS.length}:
+                  </span>{" "}
+                  {TUTORIAL_STEPS[tutorialStep]}
+                </p>
+                <button
+                  onClick={dismissTutorial}
+                  className="shrink-0 rounded-full px-3 py-1.5 text-sm font-medium opacity-60 transition hover:bg-white hover:opacity-100"
+                >
+                  Skip
+                </button>
+              </div>
+            )}
+            <SketchCanvas
+              sketch={sketch}
+              onChange={updateSketch}
+              onNotice={notice}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={history.past.length > 0}
+              canRedo={history.future.length > 0}
+            />
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm opacity-60">Examples:</span>
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex.name}
                   title={ex.description}
-                  onClick={() => setSketch(ex.sketch)}
+                  onClick={() => updateSketch(ex.sketch)}
                   className="rounded-full bg-white/70 px-3 py-1.5 text-sm transition hover:bg-white"
                 >
                   {ex.name}

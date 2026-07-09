@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_NODES, type Sketch, type SketchNode } from "../game/types";
 
-type Tool = "draw" | "start" | "goal" | "erase";
+type Tool = "draw" | "move" | "start" | "goal" | "erase";
 
 interface Props {
   sketch: Sketch;
   onChange: (s: Sketch) => void;
   onNotice: (msg: string) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
-const HIT_RADIUS = 22;
+const COARSE_POINTER =
+  typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+const HIT_RADIUS = COARSE_POINTER ? 30 : 22;
+const EDGE_HIT = COARSE_POINTER ? 20 : 14;
 const NODE_RADIUS = 15;
 
 function jitter(seed: number, salt: number): number {
@@ -17,11 +24,21 @@ function jitter(seed: number, salt: number): number {
   return (x - Math.floor(x)) * 2 - 1;
 }
 
-export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
+export default function SketchCanvas({
+  sketch,
+  onChange,
+  onNotice,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<Tool>("draw");
   const [drag, setDrag] = useState<{ from: number; x: number; y: number } | null>(null);
+  const [moveDrag, setMoveDrag] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [eraseHover, setEraseHover] = useState<{ node: number; edge: number } | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
@@ -33,9 +50,13 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     return () => ro.disconnect();
   }, []);
 
+  // While a platform is being moved, render it at the pointer position.
   const toPx = useCallback(
-    (n: { x: number; y: number }) => ({ x: n.x * size.w, y: n.y * size.h }),
-    [size]
+    (n: SketchNode) => {
+      if (moveDrag && n.id === moveDrag.id) return { x: moveDrag.x, y: moveDrag.y };
+      return { x: n.x * size.w, y: n.y * size.h };
+    },
+    [size, moveDrag]
   );
 
   const nodeAt = useCallback(
@@ -52,6 +73,8 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
   const edgeAt = useCallback(
     (px: number, py: number): number => {
       const byId = new Map(sketch.nodes.map((n) => [n.id, toPx(n)]));
+      let bestIdx = -1;
+      let bestDist = EDGE_HIT;
       for (let i = 0; i < sketch.edges.length; i++) {
         const [a, b] = sketch.edges[i];
         const pa = byId.get(a)!;
@@ -61,9 +84,12 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         const len2 = dx * dx + dy * dy || 1;
         const t = Math.max(0, Math.min(1, ((px - pa.x) * dx + (py - pa.y) * dy) / len2));
         const d = Math.hypot(pa.x + t * dx - px, pa.y + t * dy - py);
-        if (d < 12) return i;
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
       }
-      return -1;
+      return bestIdx;
     },
     [sketch, toPx]
   );
@@ -80,19 +106,20 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
 
     const byId = new Map(sketch.nodes.map((n) => [n.id, toPx(n)]));
 
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#6b6480";
     ctx.lineCap = "round";
-    for (const [a, b] of sketch.edges) {
+    sketch.edges.forEach(([a, b], i) => {
       const pa = byId.get(a)!;
       const pb = byId.get(b)!;
       const mx = (pa.x + pb.x) / 2 + jitter(a + b, 1) * 6;
       const my = (pa.y + pb.y) / 2 + jitter(a + b, 2) * 6;
+      const hovered = eraseHover?.edge === i;
+      ctx.lineWidth = hovered ? 4 : 2;
+      ctx.strokeStyle = hovered ? "#e0655a" : "#6b6480";
       ctx.beginPath();
       ctx.moveTo(pa.x, pa.y);
       ctx.quadraticCurveTo(mx, my, pb.x, pb.y);
       ctx.stroke();
-    }
+    });
 
     if (drag) {
       const from = sketch.nodes.find((n) => n.id === drag.from);
@@ -101,6 +128,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         ctx.save();
         ctx.setLineDash([6, 6]);
         ctx.strokeStyle = "#b9aee8";
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(pf.x, pf.y);
         ctx.lineTo(drag.x, drag.y);
@@ -113,12 +141,14 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       const p = toPx(n);
       const isStart = sketch.start === n.id;
       const isGoal = sketch.goal === n.id;
+      const hovered = eraseHover?.node === n.id;
+      const moving = moveDrag?.id === n.id;
       ctx.beginPath();
       ctx.arc(p.x, p.y, NODE_RADIUS, 0, Math.PI * 2);
       ctx.fillStyle = isStart ? "#7ad3b2" : isGoal ? "#f7998f" : "#fffdf8";
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#4a4458";
+      ctx.lineWidth = hovered || moving ? 3 : 2;
+      ctx.strokeStyle = hovered ? "#e0655a" : moving ? "#8d7bd8" : "#4a4458";
       ctx.stroke();
 
       ctx.beginPath();
@@ -156,7 +186,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         ctx.fill();
       }
     }
-  }, [sketch, drag, size, toPx]);
+  }, [sketch, drag, moveDrag, eraseHover, size, toPx]);
 
   const pointerPos = (e: React.PointerEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -187,6 +217,8 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         onChange({ ...sketch, nodes: [...sketch.nodes, node] });
         setDrag({ from: id, x, y });
       }
+    } else if (tool === "move" && hit) {
+      setMoveDrag({ id: hit.id, x, y });
     } else if (tool === "start" && hit) {
       onChange({
         ...sketch,
@@ -213,18 +245,49 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
           onChange({ ...sketch, edges: sketch.edges.filter((_, i) => i !== ei) });
         }
       }
+      setEraseHover(null);
     }
   };
 
   const handleMove = (e: React.PointerEvent) => {
-    if (!drag) return;
     const { x, y } = pointerPos(e);
-    setDrag({ ...drag, x, y });
+    if (drag) {
+      setDrag({ ...drag, x, y });
+      return;
+    }
+    if (moveDrag) {
+      setMoveDrag({ ...moveDrag, x, y });
+      return;
+    }
+    if (tool === "erase") {
+      // Preview which node or edge a click would erase.
+      const hit = nodeAt(x, y);
+      const edge = hit ? -1 : edgeAt(x, y);
+      const next = hit || edge >= 0 ? { node: hit?.id ?? -1, edge } : null;
+      if (
+        (next === null) !== (eraseHover === null) ||
+        next?.node !== eraseHover?.node ||
+        next?.edge !== eraseHover?.edge
+      ) {
+        setEraseHover(next);
+      }
+    }
   };
 
   const handleUp = (e: React.PointerEvent) => {
-    if (!drag) return;
     const { x, y } = pointerPos(e);
+    if (moveDrag) {
+      // Commit the final position as one undoable change.
+      const nx = Math.min(0.97, Math.max(0.03, x / size.w));
+      const ny = Math.min(0.97, Math.max(0.03, y / size.h));
+      onChange({
+        ...sketch,
+        nodes: sketch.nodes.map((n) => (n.id === moveDrag.id ? { ...n, x: nx, y: ny } : n)),
+      });
+      setMoveDrag(null);
+      return;
+    }
+    if (!drag) return;
     const hit = nodeAt(x, y);
     if (hit && hit.id !== drag.from) {
       const key = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
@@ -236,12 +299,25 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     setDrag(null);
   };
 
-  const tools: { id: Tool; label: string }[] = [
-    { id: "draw", label: "Draw" },
-    { id: "start", label: "Start" },
-    { id: "goal", label: "Goal" },
-    { id: "erase", label: "Erase" },
+  const cancelPointer = () => {
+    setDrag(null);
+    setMoveDrag(null);
+    setEraseHover(null);
+  };
+
+  const tools: { id: Tool; label: string; hint: string }[] = [
+    { id: "draw", label: "Draw", hint: "Tap to place platforms, drag to connect them" },
+    { id: "move", label: "Move", hint: "Drag a platform to reposition it" },
+    { id: "start", label: "Start", hint: "Tap a platform to mark the start" },
+    { id: "goal", label: "Goal", hint: "Tap a platform to mark the goal" },
+    { id: "erase", label: "Erase", hint: "Tap a platform or path to remove it" },
   ];
+
+  const cursorFor = () => {
+    if (tool === "erase") return eraseHover ? "pointer" : "default";
+    if (tool === "move") return moveDrag ? "grabbing" : "grab";
+    return "crosshair";
+  };
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -249,8 +325,12 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         {tools.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTool(t.id)}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
+            onClick={() => {
+              setTool(t.id);
+              setEraseHover(null);
+            }}
+            title={t.hint}
+            className={`min-h-11 rounded-full px-4 py-2 text-sm font-medium transition-all ${
               tool === t.id
                 ? "bg-ink text-paper shadow-md"
                 : "bg-white/70 text-ink hover:bg-white"
@@ -260,13 +340,32 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
             {t.label}
           </button>
         ))}
+        <span className="mx-1 h-6 w-px bg-black/10" aria-hidden="true" />
+        <button
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+          className="min-h-11 rounded-full bg-white/70 px-4 py-2 text-sm font-medium transition-all hover:bg-white disabled:opacity-35"
+        >
+          Undo
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+          aria-label="Redo"
+          className="min-h-11 rounded-full bg-white/70 px-4 py-2 text-sm font-medium transition-all hover:bg-white disabled:opacity-35"
+        >
+          Redo
+        </button>
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm text-ink-soft" style={{ color: "#8b84a0" }}>
+          <span className="text-sm" style={{ color: "#8b84a0" }}>
             {sketch.nodes.length}/{MAX_NODES} platforms
           </span>
           <button
             onClick={() => onChange({ nodes: [], edges: [], start: null, goal: null })}
-            className="rounded-full bg-white/70 px-4 py-2 text-sm font-medium text-ink transition-all hover:bg-white"
+            className="min-h-11 rounded-full bg-white/70 px-4 py-2 text-sm font-medium transition-all hover:bg-white"
           >
             Clear all
           </button>
@@ -276,11 +375,12 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         <canvas
           ref={canvasRef}
           className="absolute inset-0 h-full w-full touch-none rounded-2xl"
-          style={{ cursor: tool === "erase" ? "not-allowed" : "crosshair" }}
+          style={{ cursor: cursorFor() }}
           onPointerDown={handleDown}
           onPointerMove={handleMove}
           onPointerUp={handleUp}
-          onPointerCancel={() => setDrag(null)}
+          onPointerLeave={() => setEraseHover(null)}
+          onPointerCancel={cancelPointer}
         />
         {sketch.nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
