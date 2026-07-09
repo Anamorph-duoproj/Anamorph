@@ -1,58 +1,55 @@
 # Anamorph
 
-Ein browserbasiertes Perspektiv-Puzzle: Du zeichnest mit ein paar Strichen eine
-Skizze — Plattformen als Punkte, Wege als Linien — und Anamorph verwandelt sie
-in eine 3D-Struktur, deren Wege aus fast jedem Blickwinkel zerfallen wirken.
-Nur bei bestimmten Rotationswinkeln "klicken" verbundene Plattformen optisch
-zusammen (Prinzip: Anamorphose). Drehe die Struktur wie einen Zauberwürfel,
-finde die richtigen Ansichten und führe die Figur zum Ziel.
+A browser-based perspective puzzle. You draw a small sketch with points and
+lines, then Anamorph turns it into a 3D structure. Most viewpoints make the
+paths look broken. At specific rotation angles, connected platforms visually
+line up and become walkable.
 
-## Spielen
+## How to Play
 
-1. **Zeichnen** — Tippe auf das Papier, um Plattformen zu setzen (max. 12).
-   Ziehe von Punkt zu Punkt, um Wege zu verbinden. Markiere Start 🟢 und
-   Ziel 🚩. Oder lade eine der fünf Beispiel-Skizzen.
-2. **Verwandeln** — „In 3D verwandeln“ erzeugt die Struktur. Eine
-   Lösbarkeitsprüfung garantiert, dass jedes generierte Level lösbar ist.
-3. **Lösen** — Ziehen dreht die Struktur (sanftes Snapping auf 8 Blickwinkel),
-   Tippen lässt die Figur per BFS über die gerade aktiven Wege Richtung Ziel
-   laufen. Aktive Wege leuchten als pulsierende Brücken.
+1. **Draw** - Place platforms on the paper. Drag from one platform to another
+   to create paths. Mark one platform as the start and one as the goal.
+2. **Transform** - Use **Transform to 3D** to generate a playable structure.
+   The generator checks that the level can be solved.
+3. **Solve** - Drag to rotate the structure. When platforms line up, their
+   path becomes active. Tap to move the figure across the currently active
+   paths until it reaches the goal.
 
-## Wie die Anamorphose funktioniert
+You can also load one of the example sketches and start from there.
 
-- **Generator** ([src/game/generator.ts](src/game/generator.ts)): Jede
-  Spannbaum-Kante der Skizze bekommt einen der 8 Snap-Winkel zugewiesen. Der
-  Kind-Knoten wird entlang der Blickrichtung dieses Winkels in die Tiefe
-  versetzt, plus ca. eine Plattformbreite Versatz in der Bildebene. Aus genau
-  diesem Winkel erscheinen beide Plattformen benachbart, aus der Startansicht
-  garantiert getrennt. Eine Constraint-/Retry-Schleife verhindert
-  Durchdringungen und unlösbare Level.
-- **Anamorphose-Check** ([src/game/anamorph.ts](src/game/anamorph.ts)): Pro
-  Frame werden alle Plattform-Endpunkte über die Orthokamera auf
-  Bildschirmkoordinaten projiziert; fällt eine verbundene Zweiergruppe
-  innerhalb der Toleranz zusammen, gilt die Kante als „aktiv“.
-- **Bewegung** ([src/game/pathfinding.ts](src/game/pathfinding.ts)): BFS über
-  die aktuell aktiven Kanten; erreicht sie das Ziel nicht, läuft die Figur zum
-  erreichbaren Knoten, der dem Ziel am nächsten ist.
+## How the Anamorphosis Works
 
-## Entwicklung
+- **Generator** ([src/game/generator.ts](src/game/generator.ts)): Each spanning
+  tree edge receives one of the eight snap angles. The child platform is moved
+  in depth along that viewing direction, plus roughly one platform width in the
+  image plane. From that exact angle, both platforms appear close enough to
+  connect. From the start view, they remain separated.
+- **Anamorphosis check** ([src/game/anamorph.ts](src/game/anamorph.ts)): Each
+  frame projects the platform endpoints through the orthographic camera. If a
+  connected pair lands within the activation tolerance, the edge becomes active.
+- **Movement** ([src/game/pathfinding.ts](src/game/pathfinding.ts)): The figure
+  uses BFS over the currently active edges. If it cannot reach the goal, it
+  moves to the reachable platform that is closest to the goal in the full graph.
+
+## Development
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm run build    # statisches Build nach dist/
+npm run build    # static build in dist/
+npm test         # solvability checks
 ```
 
-Stack: React 18 · Vite · TypeScript · Tailwind CSS 4 · Three.js. Kein Backend.
+Stack: React 18, Vite, TypeScript, Tailwind CSS 4, Three.js. No backend.
 
-Die Kernlogik ist headless mit Node ausführbar (Type-Stripping), z. B. für
-Lösbarkeits-Tests über alle Beispiel-Skizzen und Seeds.
+The core game logic can run headlessly in Node for solvability checks across
+example sketches and seeds.
 
 ## Deployment
 
-Statisches Build, kein Server nötig.
+The app builds to static files and does not need a server runtime.
 
-- **Vercel**: Repo importieren — Vite wird automatisch erkannt
-  (Build `npm run build`, Output `dist`). Fertig.
-- **Netlify**: [netlify.toml](netlify.toml) liegt bei — Repo verbinden oder
-  `netlify deploy --prod` ausführen.
+- **Vercel**: Import the repository. Vite is detected automatically
+  (build command `npm run build`, output `dist`).
+- **Netlify**: [netlify.toml](netlify.toml) is included. Connect the repository
+  or run `netlify deploy --prod`.

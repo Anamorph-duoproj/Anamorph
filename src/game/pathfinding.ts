@@ -1,4 +1,3 @@
-/** Adjazenzliste aus einer Kantenliste (optional gefiltert auf aktive Kanten). */
 export function adjacency(
   nodeCount: number,
   edges: [number, number][],
@@ -13,7 +12,6 @@ export function adjacency(
   return adj;
 }
 
-/** BFS: kürzester Pfad von from nach to; null, wenn unerreichbar. */
 export function bfsPath(adj: number[][], from: number, to: number): number[] | null {
   if (from === to) return [from];
   const prev = new Array<number>(adj.length).fill(-1);
@@ -41,7 +39,6 @@ export function bfsPath(adj: number[][], from: number, to: number): number[] | n
   return null;
 }
 
-/** BFS-Distanzen von einem Startknoten zu allen anderen (Infinity = unerreichbar). */
 export function bfsDistances(adj: number[][], from: number): number[] {
   const dist = new Array<number>(adj.length).fill(Infinity);
   dist[from] = 0;
@@ -57,11 +54,6 @@ export function bfsDistances(adj: number[][], from: number): number[] {
   return dist;
 }
 
-/**
- * Bewegungsziel der Figur: BFS über aktive Kanten Richtung Ziel.
- * Erreicht die Suche das Ziel nicht, läuft die Figur zum erreichbaren
- * Knoten mit der geringsten Distanz zum Ziel im Gesamtgraphen.
- */
 export function planWalk(
   nodeCount: number,
   edges: [number, number][],

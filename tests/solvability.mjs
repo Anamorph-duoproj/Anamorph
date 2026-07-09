@@ -1,9 +1,8 @@
-// Headless-Lösbarkeitstest: generiert alle Beispiel-Skizzen (plus ein dichtes
-// 12-Knoten-Worst-Case) über viele Seeds und simuliert den kompletten
-// Spieldurchlauf mit der echten Bewegungs-Policy (planWalk über die an den
-// 8 Snap-Winkeln aktiven Kanten).
+// Headless solvability test: generates all example sketches plus a dense
+// 12-node worst case across many seeds, then simulates full playthroughs with
+// the real movement policy.
 //
-// Ausführen:  npm test   (Node >= 22.6, nutzt natives TypeScript-Stripping)
+// Run with: npm test
 
 const game = (m) => import(new URL(`../src/game/${m}`, import.meta.url));
 const { EXAMPLES } = await game("examples.ts");
@@ -33,7 +32,6 @@ function playthrough(lvl) {
   return node === lvl.goal;
 }
 
-// Dichteste sinnvolle Skizze: 12 Knoten, Gitter mit Querkanten.
 const dense = {
   nodes: Array.from({ length: MAX_NODES }, (_, id) => ({
     id,
@@ -50,7 +48,7 @@ const dense = {
 
 const cases = [
   ...EXAMPLES.map((e) => ({ name: e.name, sketch: e.sketch })),
-  { name: "Dicht-12", sketch: dense },
+  { name: "Dense-12", sketch: dense },
 ];
 
 const SEEDS = 60;
@@ -64,16 +62,15 @@ for (const c of cases) {
       genFail++;
       continue;
     }
-    // Startansicht muss "zerfallen" sein und der Durchlauf klappen.
     if (activeEdgesAtSnap(res.level, 0).some(Boolean) || !playthrough(res.level)) {
       playFail++;
     }
   }
   totalFail += genFail + playFail;
   console.log(
-    `${c.name.padEnd(12)} Generierung fehlgeschlagen: ${genFail}/${SEEDS} · Durchlauf fehlgeschlagen: ${playFail}/${SEEDS}`
+    `${c.name.padEnd(15)} generation failed: ${genFail}/${SEEDS} / playthrough failed: ${playFail}/${SEEDS}`
   );
 }
 
-console.log(totalFail === 0 ? "\nALLES OK" : `\n${totalFail} FEHLER GESAMT`);
+console.log(totalFail === 0 ? "\nALL OK" : `\n${totalFail} TOTAL FAILURES`);
 process.exit(totalFail === 0 ? 0 : 1);

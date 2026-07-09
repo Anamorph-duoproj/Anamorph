@@ -12,7 +12,6 @@ interface Props {
 const HIT_RADIUS = 22;
 const NODE_RADIUS = 15;
 
-/** Deterministischer Wackel-Wert für den handgezeichneten Look. */
 function jitter(seed: number, salt: number): number {
   const x = Math.sin(seed * 127.1 + salt * 311.7) * 43758.5453;
   return (x - Math.floor(x)) * 2 - 1;
@@ -28,8 +27,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
   useEffect(() => {
     const wrap = wrapRef.current!;
     const measure = () => setSize({ w: wrap.clientWidth, h: wrap.clientHeight });
-    // sofort messen — ResizeObserver feuert erst mit den Rendering-Steps
-    // (in Hintergrund-Tabs u.U. gar nicht)
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(wrap);
@@ -71,7 +68,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     [sketch, toPx]
   );
 
-  // --- Zeichnen -----------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.w === 0) return;
@@ -84,7 +80,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
 
     const byId = new Map(sketch.nodes.map((n) => [n.id, toPx(n)]));
 
-    // Kanten als leicht gewellte Bleistiftstriche
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#6b6480";
     ctx.lineCap = "round";
@@ -99,7 +94,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       ctx.stroke();
     }
 
-    // Temporäre Verbindungslinie beim Ziehen
     if (drag) {
       const from = sketch.nodes.find((n) => n.id === drag.from);
       if (from) {
@@ -115,7 +109,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       }
     }
 
-    // Knoten als skizzierte Kreise
     for (const n of sketch.nodes) {
       const p = toPx(n);
       const isStart = sketch.start === n.id;
@@ -127,7 +120,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       ctx.lineWidth = 2;
       ctx.strokeStyle = "#4a4458";
       ctx.stroke();
-      // zweiter, leicht versetzter Ring für den Handzeichnungs-Effekt
+
       ctx.beginPath();
       ctx.arc(
         p.x + jitter(n.id, 3) * 1.5,
@@ -145,10 +138,9 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         ctx.font = "bold 13px ui-sans-serif, system-ui";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(isStart ? "S" : "Z", p.x, p.y + 0.5);
+        ctx.fillText(isStart ? "S" : "G", p.x, p.y + 0.5);
       }
       if (isGoal) {
-        // kleines Fähnchen am Zielpunkt
         ctx.beginPath();
         ctx.moveTo(p.x + 8, p.y - NODE_RADIUS - 2);
         ctx.lineTo(p.x + 8, p.y - NODE_RADIUS - 16);
@@ -166,7 +158,6 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     }
   }, [sketch, drag, size, toPx]);
 
-  // --- Interaktion --------------------------------------------------------
   const pointerPos = (e: React.PointerEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -177,7 +168,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     try {
       canvasRef.current!.setPointerCapture(e.pointerId);
     } catch {
-      // synthetische Events ohne aktiven Pointer — Capture ist optional
+      // Pointer capture is optional for synthetic events.
     }
     const { x, y } = pointerPos(e);
     const hit = nodeAt(x, y);
@@ -188,7 +179,7 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
       } else {
         if (size.w === 0 || size.h === 0) return;
         if (sketch.nodes.length >= MAX_NODES) {
-          onNotice(`Maximal ${MAX_NODES} Plattformen — radiere erst etwas weg.`);
+          onNotice(`Maximum ${MAX_NODES} platforms. Erase something first.`);
           return;
         }
         const id = sketch.nodes.reduce((m, n) => Math.max(m, n.id), -1) + 1;
@@ -245,11 +236,11 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
     setDrag(null);
   };
 
-  const tools: { id: Tool; label: string; icon: string }[] = [
-    { id: "draw", label: "Zeichnen", icon: "✏️" },
-    { id: "start", label: "Start", icon: "🟢" },
-    { id: "goal", label: "Ziel", icon: "🚩" },
-    { id: "erase", label: "Radieren", icon: "🧽" },
+  const tools: { id: Tool; label: string }[] = [
+    { id: "draw", label: "Draw" },
+    { id: "start", label: "Start" },
+    { id: "goal", label: "Goal" },
+    { id: "erase", label: "Erase" },
   ];
 
   return (
@@ -266,18 +257,18 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
             }`}
             style={tool === t.id ? { backgroundColor: "#4a4458", color: "#faf6ee" } : {}}
           >
-            {t.icon} {t.label}
+            {t.label}
           </button>
         ))}
         <div className="ml-auto flex items-center gap-3">
           <span className="text-sm text-ink-soft" style={{ color: "#8b84a0" }}>
-            {sketch.nodes.length}/{MAX_NODES} Plattformen
+            {sketch.nodes.length}/{MAX_NODES} platforms
           </span>
           <button
             onClick={() => onChange({ nodes: [], edges: [], start: null, goal: null })}
             className="rounded-full bg-white/70 px-4 py-2 text-sm font-medium text-ink transition-all hover:bg-white"
           >
-            Alles löschen
+            Clear all
           </button>
         </div>
       </div>
@@ -294,11 +285,11 @@ export default function SketchCanvas({ sketch, onChange, onNotice }: Props) {
         {sketch.nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <p className="max-w-xs text-center text-sm" style={{ color: "#8b84a0" }}>
-              Tippe, um Plattformen zu setzen.
+              Tap to place platforms.
               <br />
-              Ziehe von Punkt zu Punkt, um Wege zu verbinden.
+              Drag from point to point to create paths.
               <br />
-              Markiere dann Start 🟢 und Ziel 🚩.
+              Then mark the start and the goal.
             </p>
           </div>
         )}

@@ -14,11 +14,10 @@ function sketch(
   };
 }
 
-/** Vorgefertigte Beispiel-Skizzen zum Sofort-Ausprobieren. */
 export const EXAMPLES: ExampleSketch[] = [
   {
-    name: "Brücke",
-    description: "Vier Plattformen in einer Reihe — der sanfte Einstieg.",
+    name: "Bridge",
+    description: "Four platforms in a row. A gentle first puzzle.",
     sketch: sketch(
       [
         [0.15, 0.55],
@@ -36,8 +35,8 @@ export const EXAMPLES: ExampleSketch[] = [
     ),
   },
   {
-    name: "Zickzack",
-    description: "Sechs Plattformen im Zickzack — zwei Drehungen nötig.",
+    name: "Zigzag",
+    description: "Six platforms in a zigzag. Several rotations are needed.",
     sketch: sketch(
       [
         [0.12, 0.75],
@@ -59,8 +58,8 @@ export const EXAMPLES: ExampleSketch[] = [
     ),
   },
   {
-    name: "Dreiecksturm",
-    description: "Ein Dreieck mit Ausläufern — mehrere Wege ans Ziel.",
+    name: "Triangle Tower",
+    description: "A triangle with branches. There is more than one route.",
     sketch: sketch(
       [
         [0.15, 0.8],
@@ -81,8 +80,8 @@ export const EXAMPLES: ExampleSketch[] = [
     ),
   },
   {
-    name: "Stern",
-    description: "Alles läuft über die Mitte — welche Ansicht öffnet den Weg?",
+    name: "Star",
+    description: "Everything passes through the center. Which view opens the path?",
     sketch: sketch(
       [
         [0.5, 0.5],
@@ -104,8 +103,8 @@ export const EXAMPLES: ExampleSketch[] = [
     ),
   },
   {
-    name: "Schleife",
-    description: "Acht Plattformen im Ring — links herum oder rechts herum?",
+    name: "Loop",
+    description: "Eight platforms in a ring. Choose the right way around.",
     sketch: sketch(
       [
         [0.5, 0.12],
