@@ -14,6 +14,8 @@ interface Props {
   onWin: (stats: Stats) => void;
 }
 
+const COARSE_POINTER =
+  typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 const PLATFORM_HEIGHT = 0.45;
 const PALETTE = [0xb9aee8, 0xa8d5e5, 0xf8dfa8, 0xd8b4dc, 0xa9dcc3, 0xf0c4ad];
 const START_COLOR = 0x7ad3b2;
@@ -267,6 +269,22 @@ export default function GameScene({ level, onWin }: Props) {
       registerSnap();
     };
 
+    // Keyboard controls: arrow keys rotate, Space walks.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        rotateByRef.current(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        rotateByRef.current(1);
+      } else if (e.key === " ") {
+        e.preventDefault();
+        if (!walkPath && !won) tryWalk();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+
     if (import.meta.env.DEV) {
       (window as any).__anamorph = {
         rotate: (d: 1 | -1) => rotateByRef.current(d),
@@ -379,6 +397,7 @@ export default function GameScene({ level, onWin }: Props) {
       cancelAnimationFrame(raf);
       window.clearTimeout(timer);
       ro.disconnect();
+      window.removeEventListener("keydown", onKeyDown);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -430,7 +449,11 @@ export default function GameScene({ level, onWin }: Props) {
             Left
           </button>
           <span className="rounded-full bg-white/60 px-4 py-1.5 text-xs backdrop-blur sm:text-sm">
-            {walking ? "Figure walking..." : "Drag to rotate / Tap to move"}
+            {walking
+              ? "Figure walking..."
+              : COARSE_POINTER
+                ? "Drag to rotate / Tap to move"
+                : "Drag or arrow keys to rotate / Tap or Space to move"}
           </span>
           <button
             onClick={() => rotateByRef.current(1)}
