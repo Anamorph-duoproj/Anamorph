@@ -15,7 +15,18 @@ line up and become walkable.
    path becomes active. Tap to move the figure across the currently active
    paths until it reaches the goal.
 
-You can also load one of the example sketches and start from there.
+You can also load one of the example sketches and start from there. On your
+first visit, a short interactive tutorial walks you through these steps; it can
+be replayed anytime with the **Tutorial** button.
+
+## Editor and Controls
+
+- **Tools**: Draw (place and connect platforms), Move (reposition a platform),
+  Start / Goal (mark a platform), Erase (remove a platform or path — hovering
+  previews what a click would remove).
+- **Undo / Redo**: toolbar buttons or `Ctrl+Z` / `Ctrl+Y` (also `Ctrl+Shift+Z`).
+- **In the 3D scene**: drag or use the arrow keys to rotate, tap or press
+  `Space` to move the figure.
 
 ## How the Anamorphosis Works
 
