@@ -36,6 +36,20 @@ best result in `localStorage`. Progress is intentionally local-only for now so
 the game remains static and backend-free; shared accounts and stored levels are
 left for a later storage layer.
 
+## Profiles, Saved Levels and Sharing
+
+Everything stays in the browser; there is no backend and no password.
+
+- **Sign in** creates or selects a local profile. Saved levels and challenge
+  progress are namespaced per profile in `localStorage`; without a profile you
+  play as guest with your own separate space.
+- **Save level / My levels** stores the current sketch under a name and lets
+  you load or delete it later.
+- **Share link** encodes the whole sketch into the URL fragment
+  (`#level=...`), so a shared level opens anywhere the app is hosted - no
+  server storage involved. Incoming links are validated and sanitized before
+  loading.
+
 ## How the Anamorphosis Works
 
 - **Generator** ([src/game/generator.ts](src/game/generator.ts)): Each spanning
@@ -60,6 +74,9 @@ npm test         # solvability checks
 ```
 
 Stack: React 18, Vite, TypeScript, Tailwind CSS 4, Three.js. No backend.
+
+The 3D scene (and with it Three.js) is code-split and loaded on demand, so the
+initial bundle stays small; the morphing screen doubles as its loading state.
 
 The core game logic can run headlessly in Node for solvability checks across
 example sketches and seeds.
