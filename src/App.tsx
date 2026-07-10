@@ -1,20 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import SketchCanvas from "./components/SketchCanvas";
 import GameScene from "./components/GameScene";
+import { CHALLENGES, type Challenge } from "./game/challenges";
 import { EXAMPLES } from "./game/examples";
 import { generateLevel, validateSketch } from "./game/generator";
-import type { Level, Sketch } from "./game/types";
+import type { Level, Sketch, SolveStats } from "./game/types";
 
 type Phase = "draw" | "morphing" | "play";
 
 const EMPTY_SKETCH: Sketch = { nodes: [], edges: [], start: null, goal: null };
 const TUTORIAL_KEY = "anamorph.tutorialDone";
+const PROGRESS_KEY = "anamorph.challengeProgress.v1";
 const HISTORY_LIMIT = 64;
 
 interface SketchHistory {
   past: Sketch[];
   present: Sketch;
   future: Sketch[];
+}
+
+interface ChallengeProgressEntry {
+  completed: boolean;
+  best: SolveStats;
+  completedAt: string;
+}
+
+type ChallengeProgress = Record<string, ChallengeProgressEntry>;
+
+interface WinState {
+  stats: SolveStats;
+  challengeId: string | null;
+  newBest: boolean;
 }
 
 const TUTORIAL_STEPS = [
@@ -31,10 +47,27 @@ function tutorialStepFor(sketch: Sketch): number {
   return 3;
 }
 
+function loadProgress(): ChallengeProgress {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as ChallengeProgress;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isBetterStats(next: SolveStats, best: SolveStats): boolean {
+  if (next.moves !== best.moves) return next.moves < best.moves;
+  return next.rotations < best.rotations;
+}
+
 export default function App() {
   const firstVisit = useRef(localStorage.getItem(TUTORIAL_KEY) !== "1");
   const [tutorialActive, setTutorialActive] = useState(firstVisit.current);
   const [phase, setPhase] = useState<Phase>("draw");
+  const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
   const [history, setHistory] = useState<SketchHistory>({
     past: [],
     // First-time visitors start on a blank sheet so the tutorial can guide
@@ -46,7 +79,8 @@ export default function App() {
   const [level, setLevel] = useState<Level | null>(null);
   const [levelKey, setLevelKey] = useState(0);
   const [solved, setSolved] = useState(0);
-  const [winStats, setWinStats] = useState<{ moves: number; rotations: number } | null>(null);
+  const [progress, setProgress] = useState<ChallengeProgress>(loadProgress);
+  const [winStats, setWinStats] = useState<WinState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number>(0);
 
@@ -58,6 +92,10 @@ export default function App() {
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
+  useEffect(() => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  }, [progress]);
+
   const updateSketch = useCallback((next: Sketch) => {
     setHistory((h) => ({
       past: [...h.past, h.present].slice(-HISTORY_LIMIT),
@@ -65,6 +103,18 @@ export default function App() {
       future: [],
     }));
   }, []);
+
+  const resetSketch = useCallback((next: Sketch) => {
+    setHistory({ past: [], present: next, future: [] });
+  }, []);
+
+  const editSketch = useCallback(
+    (next: Sketch) => {
+      setActiveChallengeId(null);
+      updateSketch(next);
+    },
+    [updateSketch]
+  );
 
   const undo = useCallback(() => {
     setHistory((h) => {
@@ -118,6 +168,24 @@ export default function App() {
   };
 
   const validation = validateSketch(sketch);
+  const activeChallenge = CHALLENGES.find((c) => c.id === activeChallengeId) ?? null;
+  const completedCount = CHALLENGES.filter((c) => progress[c.id]?.completed).length;
+  const nextChallenge =
+    activeChallenge === null
+      ? null
+      : CHALLENGES[CHALLENGES.findIndex((c) => c.id === activeChallenge.id) + 1] ?? null;
+
+  const selectChallenge = useCallback(
+    (challenge: Challenge) => {
+      setActiveChallengeId(challenge.id);
+      resetSketch(challenge.sketch);
+      setWinStats(null);
+      setLevel(null);
+      setPhase("draw");
+      notice(`${challenge.title} challenge loaded.`);
+    },
+    [notice, resetSketch]
+  );
 
   const transform = () => {
     if (validation) {
@@ -141,7 +209,10 @@ export default function App() {
   };
 
   const backToDraw = (fresh: boolean) => {
-    if (fresh) updateSketch(EMPTY_SKETCH);
+    if (fresh) {
+      setActiveChallengeId(null);
+      resetSketch(EMPTY_SKETCH);
+    }
     setWinStats(null);
     setLevel(null);
     setPhase("draw");
@@ -153,6 +224,30 @@ export default function App() {
   };
 
   const tutorialStep = tutorialStepFor(sketch);
+
+  const completeRun = useCallback(
+    (stats: SolveStats) => {
+      setSolved((s) => s + 1);
+
+      if (!activeChallengeId) {
+        setWinStats({ stats, challengeId: null, newBest: false });
+        return;
+      }
+
+      const previous = progress[activeChallengeId];
+      const newBest = !previous || isBetterStats(stats, previous.best);
+      setProgress({
+        ...progress,
+        [activeChallengeId]: {
+          completed: true,
+          best: newBest ? stats : previous.best,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      setWinStats({ stats, challengeId: activeChallengeId, newBest });
+    },
+    [activeChallengeId, progress]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -170,6 +265,9 @@ export default function App() {
           />
         </div>
         <div className="flex shrink-0 items-center gap-3 text-sm">
+          <span className="rounded-full bg-white/60 px-3 py-1 backdrop-blur">
+            Progress: {completedCount}/{CHALLENGES.length}
+          </span>
           {solved > 0 && (
             <span className="rounded-full bg-white/60 px-3 py-1 backdrop-blur">
               Solved: {solved}
@@ -196,7 +294,7 @@ export default function App() {
 
       <main className="relative min-h-0 flex-1">
         {phase === "draw" && (
-          <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 px-4 pb-4 sm:px-6">
+          <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 px-4 pb-4 sm:px-6">
             {tutorialActive && (
               <div className="animate-fade-up flex items-center gap-3 rounded-2xl bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
                 <div className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
@@ -228,9 +326,63 @@ export default function App() {
                 </button>
               </div>
             )}
+            <section className="animate-fade-up rounded-2xl bg-white/55 p-3 shadow-sm backdrop-blur">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold">Challenges</h2>
+                  <p className="text-xs opacity-60">
+                    Complete fixed sketches and improve your best moves and rotations.
+                  </p>
+                </div>
+                {activeChallenge && (
+                  <span className="rounded-full bg-white/75 px-3 py-1 text-xs font-medium">
+                    Active: {activeChallenge.title}
+                  </span>
+                )}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {CHALLENGES.map((challenge) => {
+                  const entry = progress[challenge.id];
+                  const active = activeChallengeId === challenge.id;
+                  return (
+                    <button
+                      key={challenge.id}
+                      onClick={() => selectChallenge(challenge)}
+                      className={`min-h-28 rounded-2xl border bg-white/65 p-3 text-left text-sm shadow-sm transition hover:-translate-y-0.5 hover:bg-white ${
+                        active ? "border-[#8d7bd8] ring-2 ring-[#8d7bd8]/20" : "border-white/60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">{challenge.title}</span>
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[11px]"
+                          style={{
+                            backgroundColor: entry?.completed ? "#dff6ed" : "#f1edf7",
+                            color: entry?.completed ? "#25785e" : "#6b5f8f",
+                          }}
+                        >
+                          {entry?.completed ? "Done" : challenge.difficulty}
+                        </span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs opacity-65">
+                        {challenge.description}
+                      </p>
+                      <p className="mt-2 text-xs opacity-70">
+                        Target: {challenge.target.moves} moves / {challenge.target.rotations} rotations
+                      </p>
+                      {entry && (
+                        <p className="mt-1 text-xs font-medium">
+                          Best: {entry.best.moves} / {entry.best.rotations}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
             <SketchCanvas
               sketch={sketch}
-              onChange={updateSketch}
+              onChange={editSketch}
               onNotice={notice}
               onUndo={undo}
               onRedo={redo}
@@ -243,7 +395,10 @@ export default function App() {
                 <button
                   key={ex.name}
                   title={ex.description}
-                  onClick={() => updateSketch(ex.sketch)}
+                  onClick={() => {
+                    setActiveChallengeId(null);
+                    resetSketch(ex.sketch);
+                  }}
                   className="rounded-full bg-white/70 px-3 py-1.5 text-sm transition hover:bg-white"
                 >
                   {ex.name}
@@ -288,10 +443,7 @@ export default function App() {
           <GameScene
             key={levelKey}
             level={level}
-            onWin={(stats) => {
-              setSolved((s) => s + 1);
-              setWinStats(stats);
-            }}
+            onWin={completeRun}
           />
         )}
 
@@ -300,12 +452,18 @@ export default function App() {
             <div className="animate-pop-in mx-4 flex max-w-sm flex-col items-center gap-4 rounded-3xl bg-white/90 px-8 py-8 text-center shadow-2xl">
               <img src="/assets/icon.webp" alt="" className="h-20 w-20 rounded-xl object-cover shadow" />
               <h2 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, serif" }}>
-                Solved
+                {winStats.challengeId ? "Challenge complete" : "Solved"}
               </h2>
               <p className="text-sm opacity-70">
-                {winStats.moves} {winStats.moves === 1 ? "move" : "moves"} /{" "}
-                {winStats.rotations} {winStats.rotations === 1 ? "rotation" : "rotations"}
+                {winStats.stats.moves} {winStats.stats.moves === 1 ? "move" : "moves"} /{" "}
+                {winStats.stats.rotations}{" "}
+                {winStats.stats.rotations === 1 ? "rotation" : "rotations"}
               </p>
+              {winStats.challengeId && (
+                <p className="rounded-full bg-white px-3 py-1 text-xs font-medium shadow-sm">
+                  {winStats.newBest ? "New best saved" : "Progress saved"}
+                </p>
+              )}
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   onClick={replay}
@@ -319,6 +477,14 @@ export default function App() {
                 >
                   Edit sketch
                 </button>
+                {nextChallenge && winStats.challengeId && (
+                  <button
+                    onClick={() => selectChallenge(nextChallenge)}
+                    className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
+                  >
+                    Next challenge
+                  </button>
+                )}
                 <button
                   onClick={() => backToDraw(true)}
                   className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow transition hover:scale-105"

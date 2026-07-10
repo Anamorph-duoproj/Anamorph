@@ -28,6 +28,14 @@ be replayed anytime with the **Tutorial** button.
 - **In the 3D scene**: drag or use the arrow keys to rotate, tap or press
   `Space` to move the figure.
 
+## Challenge Progress
+
+Layer 3 adds a local challenge track built from the included sketches. Each
+challenge has a target move and rotation count, and completed runs save the
+best result in `localStorage`. Progress is intentionally local-only for now so
+the game remains static and backend-free; shared accounts and stored levels are
+left for a later storage layer.
+
 ## How the Anamorphosis Works
 
 - **Generator** ([src/game/generator.ts](src/game/generator.ts)): Each spanning
