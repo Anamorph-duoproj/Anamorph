@@ -7,7 +7,7 @@ import {
   type Level,
   type SolveStats,
 } from "../game/types";
-import { activeEdgesForCamera } from "../game/anamorph";
+import { activeEdgesForCamera } from "../game/anamorph3d";
 import { adjacency, bfsDistances, planWalk } from "../game/pathfinding";
 
 interface Props {
