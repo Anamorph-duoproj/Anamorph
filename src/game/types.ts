@@ -37,3 +37,8 @@ export interface ExampleSketch {
   description: string;
   sketch: Sketch;
 }
+
+export interface SolveStats {
+  moves: number;
+  rotations: number;
+}

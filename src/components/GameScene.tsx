@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { BASE_PITCH, PLATFORM_SIZE, SNAP_COUNT, type Level } from "../game/types";
+import {
+  BASE_PITCH,
+  PLATFORM_SIZE,
+  SNAP_COUNT,
+  type Level,
+  type SolveStats,
+} from "../game/types";
 import { activeEdgesForCamera } from "../game/anamorph";
 import { adjacency, bfsDistances, planWalk } from "../game/pathfinding";
 
-interface Stats {
-  moves: number;
-  rotations: number;
-}
-
 interface Props {
   level: Level;
-  onWin: (stats: Stats) => void;
+  onWin: (stats: SolveStats) => void;
 }
 
 const COARSE_POINTER =
@@ -162,7 +163,7 @@ export default function GameScene({ level, onWin }: Props) {
     let targetYaw = 0;
     let targetPitch = BASE_PITCH;
     let lastSnapIdx = 0;
-    const stats: Stats = { moves: 0, rotations: 0 };
+    const stats: SolveStats = { moves: 0, rotations: 0 };
 
     const placeCamera = () => {
       const cp = Math.cos(pitch);
