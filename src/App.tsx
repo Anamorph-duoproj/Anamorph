@@ -3,6 +3,8 @@ import SketchCanvas from "./components/SketchCanvas";
 import {
   CHALLENGES,
   CHALLENGE_GROUPS,
+  budgetOf,
+  starsFor,
   type Challenge,
   type ChallengeDifficulty,
 } from "./game/challenges";
@@ -19,7 +21,8 @@ import {
   signIn,
   signOut,
 } from "./game/storage";
-import type { Level, Sketch, SolveStats } from "./game/types";
+import { soundEnabled, setSoundEnabled } from "./game/sound";
+import type { Level, SolveBudget, Sketch, SolveStats } from "./game/types";
 
 // Loaded on demand so Three.js stays out of the initial bundle; the morphing
 // screen doubles as the loading state.
@@ -42,16 +45,21 @@ interface SketchHistory {
 interface ChallengeProgressEntry {
   completed: boolean;
   best: SolveStats;
+  stars: number;
   completedAt: string;
 }
 
 type ChallengeProgress = Record<string, ChallengeProgressEntry>;
 
-interface WinState {
-  stats: SolveStats;
-  challengeId: string | null;
-  newBest: boolean;
-}
+type RunResult =
+  | {
+      kind: "win";
+      stats: SolveStats;
+      challengeId: string | null;
+      stars: 0 | 1 | 2 | 3;
+      newBest: boolean;
+    }
+  | { kind: "lose"; stats: SolveStats; challengeId: string | null };
 
 type Dialog =
   | { kind: "none" }
@@ -173,6 +181,11 @@ function isBetterStats(next: SolveStats, best: SolveStats): boolean {
   return next.rotations < best.rotations;
 }
 
+function clampLimit(value: string): number {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(99, Math.max(1, n)) : 1;
+}
+
 function MorphingScreen() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6">
@@ -185,6 +198,18 @@ function MorphingScreen() {
         Building your world...
       </p>
     </div>
+  );
+}
+
+function StarRow({ stars, size = "text-2xl" }: { stars: number; size?: string }) {
+  return (
+    <span className={`inline-flex gap-0.5 ${size}`} aria-label={`${stars} of 3 stars`}>
+      {[1, 2, 3].map((n) => (
+        <span key={n} style={{ color: n <= stars ? "#f4b73f" : "rgba(74,68,88,0.2)" }}>
+          {n <= stars ? "★" : "☆"}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -220,7 +245,17 @@ export default function App() {
   const [progress, setProgress] = useState<ChallengeProgress>(() =>
     loadProgress(currentProfile())
   );
-  const [winStats, setWinStats] = useState<WinState | null>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
+  // Budget for the current play, and the limit chosen for custom sketches.
+  const [activeBudget, setActiveBudget] = useState<SolveBudget | null>(null);
+  const [customLimit, setCustomLimit] = useState({ enabled: true, rotations: 8, moves: 12 });
+  const [sound, setSound] = useState(soundEnabled());
+
+  const toggleSound = () => {
+    const next = !sound;
+    setSoundEnabled(next);
+    setSound(next);
+  };
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number>(0);
 
@@ -312,7 +347,7 @@ export default function App() {
       }
       setActiveChallengeId(null);
       resetSketch(decoded.sketch);
-      setWinStats(null);
+      setRunResult(null);
       setLevel(null);
       setPhase("draw");
       notice(decoded.name ? `Shared level "${decoded.name}" loaded.` : "Shared level loaded.");
@@ -422,7 +457,7 @@ export default function App() {
       setActiveDifficulty(challenge.difficulty);
       setActiveChallengeId(challenge.id);
       resetSketch(challenge.sketch);
-      setWinStats(null);
+      setRunResult(null);
       setLevel(null);
       setPhase("draw");
       // Give the loaded sketch the space back.
@@ -440,17 +475,27 @@ export default function App() {
     }
     // Warm the lazy chunk while the morphing screen plays.
     void import("./components/GameScene");
+    // Challenges use their fixed seed (deterministic, calibrated budget);
+    // custom sketches get a random level and the player's chosen limit.
+    const challenge = activeChallenge;
+    const seed = challenge ? challenge.seed : (Date.now() % 100000) + 1;
+    const budget: SolveBudget | null = challenge
+      ? budgetOf(challenge)
+      : customLimit.enabled
+        ? { rotations: customLimit.rotations, moves: customLimit.moves }
+        : null;
     setPhase("morphing");
     window.setTimeout(() => {
-      const result = generateLevel(sketch, Date.now() % 100000);
-      if (!result.ok) {
-        notice(result.reason);
+      const gen = generateLevel(sketch, seed);
+      if (!gen.ok) {
+        notice(gen.reason);
         setPhase("draw");
         return;
       }
-      setLevel(result.level);
+      setLevel(gen.level);
+      setActiveBudget(budget);
       setLevelKey((k) => k + 1);
-      setWinStats(null);
+      setRunResult(null);
       setPhase("play");
     }, 900);
   };
@@ -460,13 +505,13 @@ export default function App() {
       setActiveChallengeId(null);
       resetSketch(EMPTY_SKETCH);
     }
-    setWinStats(null);
+    setRunResult(null);
     setLevel(null);
     setPhase("draw");
   };
 
   const replay = () => {
-    setWinStats(null);
+    setRunResult(null);
     setLevelKey((k) => k + 1);
   };
 
@@ -477,10 +522,12 @@ export default function App() {
       setSolved((s) => s + 1);
 
       if (!activeChallengeId) {
-        setWinStats({ stats, challengeId: null, newBest: false });
+        setRunResult({ kind: "win", stats, challengeId: null, stars: 0, newBest: false });
         return;
       }
 
+      const challenge = CHALLENGES.find((c) => c.id === activeChallengeId)!;
+      const stars = starsFor(challenge, stats);
       const previous = progress[activeChallengeId];
       const newBest = !previous || isBetterStats(stats, previous.best);
       setProgress({
@@ -488,12 +535,20 @@ export default function App() {
         [activeChallengeId]: {
           completed: true,
           best: newBest ? stats : previous.best,
+          stars: Math.max(previous?.stars ?? 0, stars),
           completedAt: new Date().toISOString(),
         },
       });
-      setWinStats({ stats, challengeId: activeChallengeId, newBest });
+      setRunResult({ kind: "win", stats, challengeId: activeChallengeId, stars, newBest });
     },
     [activeChallengeId, progress]
+  );
+
+  const failRun = useCallback(
+    (stats: SolveStats) => {
+      setRunResult({ kind: "lose", stats, challengeId: activeChallengeId });
+    },
+    [activeChallengeId]
   );
 
   const closeDialog = () => setDialog({ kind: "none" });
@@ -522,6 +577,16 @@ export default function App() {
               Solved: {solved}
             </span>
           )}
+          <button
+            onClick={toggleSound}
+            aria-pressed={sound}
+            title={sound ? "Sound on" : "Sound off"}
+            aria-label={sound ? "Sound on" : "Sound off"}
+            className="rounded-lg bg-white/70 px-3 py-2 font-medium shadow-sm backdrop-blur transition hover:bg-white"
+          >
+            <span aria-hidden="true">{sound ? "♪" : "♪̸"}</span>
+            <span className="ml-1 hidden sm:inline">{sound ? "On" : "Off"}</span>
+          </button>
           {phase !== "morphing" && (
             <button
               onClick={restartTutorial}
@@ -624,6 +689,7 @@ export default function App() {
                   const entry = progress[challenge.id];
                   const active = activeChallengeId === challenge.id;
                   const group = CHALLENGE_GROUPS.find((item) => item.id === challenge.difficulty)!;
+                  const budget = budgetOf(challenge);
                   return (
                     <button
                       key={challenge.id}
@@ -649,11 +715,14 @@ export default function App() {
                         {challenge.description}
                       </p>
                       <p className="mt-1 text-xs opacity-70">
-                        Target: {challenge.target.moves} moves / {challenge.target.rotations} rotations
+                        Limit: {budget.rotations} rot / {budget.moves} moves
                       </p>
                       {entry && (
-                        <p className="mt-1 text-xs font-medium">
-                          Best: {entry.best.moves} / {entry.best.rotations}
+                        <p className="mt-1 flex items-center gap-2 text-xs font-medium">
+                          <StarRow stars={entry.stars ?? 0} size="text-sm" />
+                          <span className="opacity-60">
+                            best {entry.best.rotations}/{entry.best.moves}
+                          </span>
                         </p>
                       )}
                     </button>
@@ -674,6 +743,58 @@ export default function App() {
                 canRedo={history.future.length > 0}
               />
             </div>
+            {activeChallenge ? (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium">{activeChallenge.title} budget:</span>
+                <span className="opacity-70">
+                  {budgetOf(activeChallenge).rotations} rotations / {budgetOf(activeChallenge).moves} moves
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                <label className="flex items-center gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={customLimit.enabled}
+                    onChange={(e) => setCustomLimit({ ...customLimit, enabled: e.target.checked })}
+                    className="h-4 w-4 accent-[#8d7bd8]"
+                  />
+                  Limit rotations &amp; moves
+                </label>
+                {customLimit.enabled ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-1.5">
+                      <span className="opacity-70">Rotations</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={customLimit.rotations}
+                        onChange={(e) =>
+                          setCustomLimit({ ...customLimit, rotations: clampLimit(e.target.value) })
+                        }
+                        className="w-16 rounded-lg border border-black/10 bg-white px-2 py-1 outline-none focus:border-[#8d7bd8]"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <span className="opacity-70">Moves</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={customLimit.moves}
+                        onChange={(e) =>
+                          setCustomLimit({ ...customLimit, moves: clampLimit(e.target.value) })
+                        }
+                        className="w-16 rounded-lg border border-black/10 bg-white px-2 py-1 outline-none focus:border-[#8d7bd8]"
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <span className="opacity-60">Practice mode — play freely with no limit.</span>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => {
@@ -745,9 +866,15 @@ export default function App() {
         {phase === "play" && level && (
           <>
             <Suspense fallback={<MorphingScreen />}>
-              <GameScene key={levelKey} level={level} onWin={completeRun} />
+              <GameScene
+                key={levelKey}
+                level={level}
+                budget={activeBudget}
+                onWin={completeRun}
+                onLose={failRun}
+              />
             </Suspense>
-            {tutorialActive && !winStats && (
+            {tutorialActive && !runResult && (
               <div className="absolute left-4 top-16 z-10 w-[min(26rem,calc(100%-2rem))]">
                 <TutorialPanel step={tutorialStep} onDismiss={dismissTutorial} />
               </div>
@@ -755,53 +882,93 @@ export default function App() {
           </>
         )}
 
-        {winStats && (
+        {runResult && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/40 backdrop-blur-sm">
             <div className="animate-pop-in mx-4 flex max-w-sm flex-col items-center gap-4 rounded-3xl bg-white/90 px-8 py-8 text-center shadow-2xl">
-              <img src="/assets/icon.webp" alt="" className="h-20 w-20 rounded-xl object-cover shadow" />
-              <h2 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, serif" }}>
-                {winStats.challengeId ? "Challenge complete" : "Solved"}
-              </h2>
-              <p className="text-sm opacity-70">
-                {winStats.stats.moves} {winStats.stats.moves === 1 ? "move" : "moves"} /{" "}
-                {winStats.stats.rotations}{" "}
-                {winStats.stats.rotations === 1 ? "rotation" : "rotations"}
-              </p>
-              {winStats.challengeId && (
-                <p className="rounded-full bg-white px-3 py-1 text-xs font-medium shadow-sm">
-                  {winStats.newBest ? "New best saved" : "Progress saved"}
-                  {user ? ` for ${user}` : ""}
-                </p>
+              {runResult.kind === "win" ? (
+                <>
+                  {runResult.challengeId ? (
+                    <StarRow stars={runResult.stars} />
+                  ) : (
+                    <img src="/assets/icon.webp" alt="" className="h-20 w-20 rounded-xl object-cover shadow" />
+                  )}
+                  <h2 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, serif" }}>
+                    {runResult.challengeId ? "Challenge complete" : "Solved"}
+                  </h2>
+                  <p className="text-sm opacity-70">
+                    {runResult.stats.rotations}{" "}
+                    {runResult.stats.rotations === 1 ? "rotation" : "rotations"} /{" "}
+                    {runResult.stats.moves} {runResult.stats.moves === 1 ? "move" : "moves"}
+                    {activeBudget
+                      ? ` · limit ${activeBudget.rotations}/${activeBudget.moves}`
+                      : ""}
+                  </p>
+                  {runResult.challengeId && (
+                    <p className="rounded-full bg-white px-3 py-1 text-xs font-medium shadow-sm">
+                      {runResult.newBest ? "New best saved" : "Progress saved"}
+                      {user ? ` for ${user}` : ""}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <button
+                      onClick={replay}
+                      className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
+                    >
+                      Play again
+                    </button>
+                    <button
+                      onClick={() => backToDraw(false)}
+                      className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
+                    >
+                      Edit sketch
+                    </button>
+                    {nextChallenge && runResult.challengeId && (
+                      <button
+                        onClick={() => selectChallenge(nextChallenge)}
+                        className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
+                      >
+                        Next challenge
+                      </button>
+                    )}
+                    <button
+                      onClick={() => backToDraw(true)}
+                      className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow transition hover:scale-105"
+                      style={{ background: "linear-gradient(135deg, #8d7bd8, #5fa8c9)" }}
+                    >
+                      New sketch
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-5xl">⛔</div>
+                  <h2 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, serif" }}>
+                    Out of budget
+                  </h2>
+                  <p className="text-sm opacity-70">
+                    You used {runResult.stats.rotations} rotations and {runResult.stats.moves} moves
+                    {activeBudget
+                      ? `; the limit was ${activeBudget.rotations} rotations / ${activeBudget.moves} moves`
+                      : ""}
+                    .
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <button
+                      onClick={replay}
+                      className="rounded-full px-5 py-2 text-sm font-semibold text-white shadow transition hover:scale-105"
+                      style={{ background: "linear-gradient(135deg, #8d7bd8, #5fa8c9)" }}
+                    >
+                      Try again
+                    </button>
+                    <button
+                      onClick={() => backToDraw(false)}
+                      className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
+                    >
+                      Edit sketch
+                    </button>
+                  </div>
+                </>
               )}
-              <div className="flex flex-wrap justify-center gap-2">
-                <button
-                  onClick={replay}
-                  className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
-                >
-                  Play again
-                </button>
-                <button
-                  onClick={() => backToDraw(false)}
-                  className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
-                >
-                  Edit sketch
-                </button>
-                {nextChallenge && winStats.challengeId && (
-                  <button
-                    onClick={() => selectChallenge(nextChallenge)}
-                    className="rounded-full bg-white px-4 py-2 text-sm font-medium shadow transition hover:scale-105"
-                  >
-                    Next challenge
-                  </button>
-                )}
-                <button
-                  onClick={() => backToDraw(true)}
-                  className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow transition hover:scale-105"
-                  style={{ background: "linear-gradient(135deg, #8d7bd8, #5fa8c9)" }}
-                >
-                  New sketch
-                </button>
-              </div>
             </div>
           </div>
         )}

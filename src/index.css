@@ -120,6 +120,20 @@ body {
   animation: float-soft 2.4s ease-in-out infinite;
 }
 
+/* Respect users who ask for less motion: drop the decorative CSS animations
+   and transitions. The 3D scene's own motion is essential to gameplay and is
+   left intact. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @keyframes tutorial-tap {
   0%,
   100% {
