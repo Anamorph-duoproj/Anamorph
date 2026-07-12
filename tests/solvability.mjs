@@ -54,28 +54,48 @@ function preservesSketch(sketch, lvl) {
   return drawingScale !== null;
 }
 
+// Worst case: the full MAX_NODES as a complete grid lattice.
+const COLS = 4;
+const ROWS = Math.ceil(MAX_NODES / COLS);
+const denseEdges = [];
+for (let row = 0; row < ROWS; row++) {
+  for (let col = 0; col < COLS; col++) {
+    const i = row * COLS + col;
+    if (col < COLS - 1) denseEdges.push([i, i + 1]);
+    if (row < ROWS - 1) denseEdges.push([i, i + COLS]);
+  }
+}
 const dense = {
   nodes: Array.from({ length: MAX_NODES }, (_, id) => ({
     id,
-    x: 0.12 + (id % 4) * 0.25,
-    y: 0.15 + Math.floor(id / 4) * 0.32,
+    x: 0.14 + (id % COLS) * 0.24,
+    y: 0.1 + Math.floor(id / COLS) * 0.2,
   })),
-  edges: [
-    [0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [8, 9], [9, 10], [10, 11],
-    [0, 4], [4, 8], [1, 5], [5, 9], [2, 6], [6, 10], [3, 7], [7, 11], [1, 4], [6, 9],
-  ],
+  edges: denseEdges,
   start: 0,
-  goal: 11,
+  goal: MAX_NODES - 1,
 };
 
 const cases = [
   ...CHALLENGES.map((c) => ({ name: `${c.difficulty}-${c.title}`, sketch: c.sketch })),
   ...EXAMPLES.map((e) => ({ name: e.name, sketch: e.sketch })),
-  { name: "Dense-12", sketch: dense },
+  { name: `Dense-${MAX_NODES}`, sketch: dense },
 ];
 
+// Quality gate: the harder groups must not contain accidental shortcuts.
+// target.moves is the computed shortest route, so this catches topology bugs.
+const MIN_MOVES = { hard: 5, impossible: 6 };
+let gateFail = 0;
+for (const c of CHALLENGES) {
+  const min = MIN_MOVES[c.difficulty];
+  if (min && c.target.moves < min) {
+    console.log(`GATE ${c.id} "${c.title}": shortest route ${c.target.moves} < ${min}`);
+    gateFail++;
+  }
+}
+
 const SEEDS = 12;
-let totalFail = 0;
+let totalFail = gateFail;
 for (const c of cases) {
   let genFail = 0;
   let playFail = 0;

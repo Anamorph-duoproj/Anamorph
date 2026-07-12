@@ -13,7 +13,7 @@ export interface Sketch {
   goal: number | null;
 }
 
-export const MAX_NODES = 12;
+export const MAX_NODES = 20;
 export const SNAP_COUNT = 8;
 export const BASE_PITCH = Math.atan(1 / Math.SQRT2);
 export const PLATFORM_SIZE = 1.2;
