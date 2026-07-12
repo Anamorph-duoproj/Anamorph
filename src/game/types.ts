@@ -42,3 +42,9 @@ export interface SolveStats {
   moves: number;
   rotations: number;
 }
+
+/** An upper limit on the rotations and moves allowed to solve a level. */
+export interface SolveBudget {
+  rotations: number;
+  moves: number;
+}
