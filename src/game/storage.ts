@@ -1,13 +1,18 @@
 import { MAX_NODES, type Sketch } from "./types.ts";
 
-// Local, per-browser persistence. There is no backend: "signing in" selects a
-// named profile whose data (saved levels, challenge progress) lives in
+// Local, per-browser persistence. There is no backend: signing in unlocks a
+// named profile whose password hash, saved levels, and progress live in
 // localStorage under a per-profile namespace.
 
 const PROFILES_KEY = "anamorph.profiles";
+const PROFILE_AUTH_KEY = "anamorph.profileAuth.v1";
 const CURRENT_PROFILE_KEY = "anamorph.currentProfile";
 const LEVELS_BASE = "anamorph.savedLevels.v1";
 const SHARE_VERSION = 1;
+
+export type SignInResult =
+  | { ok: true; profile: string; created: boolean }
+  | { ok: false; reason: "invalid-name" | "invalid-password" | "wrong-password" };
 
 export interface SavedLevel {
   id: string;
@@ -29,6 +34,13 @@ function readJson<T>(key: string, fallback: T): T {
 
 // --- Profiles ---------------------------------------------------------------
 
+interface ProfileAuth {
+  name: string;
+  salt: string;
+  passwordHash: string;
+  createdAt: string;
+}
+
 export function listProfiles(): string[] {
   const list = readJson<unknown>(PROFILES_KEY, []);
   return Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : [];
@@ -45,17 +57,41 @@ export function normalizeProfileName(raw: string): string | null {
   return name;
 }
 
-export function signIn(rawName: string): string | null {
+export async function signIn(rawName: string, rawPassword: string): Promise<SignInResult> {
   const name = normalizeProfileName(rawName);
-  if (!name) return null;
+  if (!name) return { ok: false, reason: "invalid-name" };
+  const password = rawPassword;
+  if (password.length < 4 || password.length > 64)
+    return { ok: false, reason: "invalid-password" };
+
   const profiles = listProfiles();
   const existing = profiles.find((p) => p.toLowerCase() === name.toLowerCase());
   const resolved = existing ?? name;
+  const auth = readAuth();
+  const key = authKey(resolved);
+  const existingAuth = auth[key];
+
+  if (existingAuth) {
+    if (existingAuth.passwordHash !== await hashPassword(resolved, password, existingAuth.salt)) {
+      return { ok: false, reason: "wrong-password" };
+    }
+    localStorage.setItem(CURRENT_PROFILE_KEY, existingAuth.name);
+    return { ok: true, profile: existingAuth.name, created: false };
+  }
+
+  const salt = newId();
+  auth[key] = {
+    name: resolved,
+    salt,
+    passwordHash: await hashPassword(resolved, password, salt),
+    createdAt: new Date().toISOString(),
+  };
+  localStorage.setItem(PROFILE_AUTH_KEY, JSON.stringify(auth));
   if (!existing) {
     localStorage.setItem(PROFILES_KEY, JSON.stringify([...profiles, resolved]));
   }
   localStorage.setItem(CURRENT_PROFILE_KEY, resolved);
-  return resolved;
+  return { ok: true, profile: resolved, created: true };
 }
 
 export function signOut(): void {
@@ -65,6 +101,30 @@ export function signOut(): void {
 /** Namespace a storage key by profile; guests use the bare key. */
 export function profileKey(base: string, profile: string | null): string {
   return profile ? `${base}.u.${profile.toLowerCase()}` : base;
+}
+
+function readAuth(): Record<string, ProfileAuth> {
+  const raw = readJson<unknown>(PROFILE_AUTH_KEY, {});
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries = Object.entries(raw).filter(
+    (entry): entry is [string, ProfileAuth] =>
+      !!entry[1] &&
+      typeof entry[1] === "object" &&
+      typeof (entry[1] as ProfileAuth).name === "string" &&
+      typeof (entry[1] as ProfileAuth).salt === "string" &&
+      typeof (entry[1] as ProfileAuth).passwordHash === "string"
+  );
+  return Object.fromEntries(entries);
+}
+
+function authKey(profile: string): string {
+  return profile.toLowerCase();
+}
+
+async function hashPassword(profile: string, password: string, salt: string): Promise<string> {
+  const text = `${authKey(profile)}:${salt}:${password}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 // --- Saved levels -----------------------------------------------------------

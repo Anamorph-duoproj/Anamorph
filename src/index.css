@@ -119,3 +119,42 @@ body {
 .animate-float-soft {
   animation: float-soft 2.4s ease-in-out infinite;
 }
+
+@keyframes tutorial-tap {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-20deg) scale(1);
+  }
+  50% {
+    transform: translate(16px, -10px) rotate(-20deg) scale(0.78);
+  }
+}
+
+@keyframes tutorial-turn {
+  0%,
+  100% {
+    transform: perspective(180px) rotateX(16deg) rotateY(-14deg);
+  }
+  50% {
+    transform: perspective(180px) rotateX(16deg) rotateY(18deg);
+  }
+}
+
+.tutorial-pointer {
+  animation: tutorial-tap 1.8s ease-in-out infinite;
+}
+
+.tutorial-diagram-3d {
+  animation: tutorial-turn 2.6s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+
+.tutorial-diagram-3d .tutorial-node {
+  border-radius: 5px;
+  transform: rotate(45deg);
+}
+
+.tutorial-diagram-3d .tutorial-line {
+  background: #f4c85b;
+  box-shadow: 0 0 8px rgba(244, 200, 91, 0.65);
+}
