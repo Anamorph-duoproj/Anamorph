@@ -5,15 +5,20 @@ import {
   PLATFORM_SIZE,
   SNAP_COUNT,
   type Level,
+  type SolveBudget,
   type SolveStats,
 } from "../game/types";
 import { activeEdgesForCamera } from "../game/anamorph3d";
 import { adjacency, bfsDistances, planWalk } from "../game/pathfinding";
 import { projectToView } from "../game/view";
+import { playActivate, playLose, playSnap, playStep, playWin } from "../game/sound";
 
 interface Props {
   level: Level;
+  /** Optional rotation/move limit; exceeding it loses the run. */
+  budget?: SolveBudget | null;
   onWin: (stats: SolveStats) => void;
+  onLose?: (stats: SolveStats) => void;
 }
 
 const COARSE_POINTER =
@@ -32,15 +37,46 @@ function easeOutBack(t: number): number {
   return 1 + (c + 1) * x * x * x + c * x * x;
 }
 
-export default function GameScene({ level, onWin }: Props) {
+function BudgetCounter({
+  label,
+  used,
+  limit,
+}: {
+  label: string;
+  used: number;
+  limit: number | null;
+}) {
+  // Warn when one step from the limit, and mark red once it is reached.
+  const tone =
+    limit === null
+      ? "opacity-70"
+      : used >= limit
+        ? "text-rose-600"
+        : used >= limit - 1
+          ? "text-amber-600"
+          : "opacity-70";
+  return (
+    <span className={tone}>
+      <span className="opacity-60">{label} </span>
+      {limit === null ? used : `${used}/${limit}`}
+    </span>
+  );
+}
+
+export default function GameScene({ level, budget = null, onWin, onLose }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const onWinRef = useRef(onWin);
   onWinRef.current = onWin;
+  const onLoseRef = useRef(onLose);
+  onLoseRef.current = onLose;
+  const budgetRef = useRef(budget);
+  budgetRef.current = budget;
 
   const [viewLabel, setViewLabel] = useState("View 1/8");
   const [activeCount, setActiveCount] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
   const [walking, setWalking] = useState(false);
+  const [used, setUsed] = useState<SolveStats>({ rotations: 0, moves: 0 });
   const rotateByRef = useRef<(dir: 1 | -1) => void>(() => {});
 
   useEffect(() => {
@@ -188,11 +224,29 @@ export default function GameScene({ level, onWin }: Props) {
     const snapIdxOf = (y: number) =>
       ((Math.round(y / SNAP_STEP) % SNAP_COUNT) + SNAP_COUNT) % SNAP_COUNT;
 
+    let won = false;
+    let lost = false;
+
+    const overBudget = () => {
+      const b = budgetRef.current;
+      return !!b && (stats.rotations > b.rotations || stats.moves > b.moves);
+    };
+    const loseNow = () => {
+      if (won || lost) return;
+      lost = true;
+      playLose();
+      setWalking(false);
+      window.setTimeout(() => onLoseRef.current?.({ ...stats }), 450);
+    };
+
     const registerSnap = () => {
       const idx = snapIdxOf(targetYaw);
       if (idx !== lastSnapIdx) {
         stats.rotations++;
         lastSnapIdx = idx;
+        playSnap();
+        setUsed({ rotations: stats.rotations, moves: stats.moves });
+        if (overBudget()) loseNow();
       }
     };
 
@@ -201,11 +255,10 @@ export default function GameScene({ level, onWin }: Props) {
     let walkPath: number[] | null = null;
     let walkSeg = 0;
     let walkT = 0;
-    let won = false;
     let activeMask: boolean[] = level.edges.map(() => false);
 
     const tryWalk = () => {
-      if (walkPath || won) return;
+      if (walkPath || won || lost) return;
       const path = planWalk(n, level.edges, activeMask, currentNode, level.goal, goalDistances);
       if (!path || path.length < 2) {
         setHint(
@@ -220,6 +273,7 @@ export default function GameScene({ level, onWin }: Props) {
       walkSeg = 0;
       walkT = 0;
       stats.moves += path.length - 1;
+      setUsed({ rotations: stats.rotations, moves: stats.moves });
       setWalking(true);
     };
 
@@ -232,7 +286,7 @@ export default function GameScene({ level, onWin }: Props) {
 
     const el = renderer.domElement;
     const onDown = (e: PointerEvent) => {
-      if (walkPath) return;
+      if (walkPath || won || lost) return;
       pointerDown = true;
       moved = false;
       startX = e.clientX;
@@ -273,7 +327,7 @@ export default function GameScene({ level, onWin }: Props) {
     el.addEventListener("pointercancel", onUp);
 
     rotateByRef.current = (dir) => {
-      if (walkPath || won) return;
+      if (walkPath || won || lost) return;
       targetYaw = (Math.round(targetYaw / SNAP_STEP) + dir) * SNAP_STEP;
       targetPitch = BASE_PITCH;
       registerSnap();
@@ -290,7 +344,7 @@ export default function GameScene({ level, onWin }: Props) {
         rotateByRef.current(1);
       } else if (e.key === " ") {
         e.preventDefault();
-        if (!walkPath && !won) tryWalk();
+        if (!walkPath && !won && !lost) tryWalk();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -366,6 +420,7 @@ export default function GameScene({ level, onWin }: Props) {
       }
       const ac = activeMask.filter(Boolean).length;
       if (ac !== lastActive) {
+        if (lastActive >= 0 && ac > lastActive) playActivate();
         lastActive = ac;
         setActiveCount(ac);
       }
@@ -384,12 +439,18 @@ export default function GameScene({ level, onWin }: Props) {
           walkSeg++;
           walkT = 0;
           currentNode = walkPath[walkSeg];
+          playStep();
           if (walkSeg >= walkPath.length - 1) {
             walkPath = null;
             setWalking(false);
-            if (currentNode === level.goal && !won) {
-              won = true;
-              window.setTimeout(() => onWinRef.current({ ...stats }), 450);
+            if (!won && !lost) {
+              if (currentNode === level.goal && !overBudget()) {
+                won = true;
+                playWin();
+                window.setTimeout(() => onWinRef.current({ ...stats }), 450);
+              } else if (overBudget()) {
+                loseNow();
+              }
             }
           }
         }
@@ -429,7 +490,7 @@ export default function GameScene({ level, onWin }: Props) {
     <div className="relative h-full w-full">
       <div ref={mountRef} className="scene-bg h-full w-full overflow-hidden" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-3 flex items-start justify-center gap-2 px-3">
+      <div className="pointer-events-none absolute inset-x-0 top-3 flex flex-wrap items-start justify-center gap-2 px-3">
         <div className="animate-fade-up flex items-center gap-2 rounded-full bg-white/75 px-4 py-2 text-sm font-medium shadow-sm backdrop-blur">
           <span>{viewLabel}</span>
           <span className="opacity-40">/</span>
@@ -440,6 +501,11 @@ export default function GameScene({ level, onWin }: Props) {
                 ? "1 active path"
                 : `${activeCount} active paths`}
           </span>
+        </div>
+        <div className="animate-fade-up flex items-center gap-2 rounded-full bg-white/75 px-4 py-2 text-sm font-medium shadow-sm backdrop-blur">
+          <BudgetCounter label="Rotations" used={used.rotations} limit={budget?.rotations ?? null} />
+          <span className="opacity-40">/</span>
+          <BudgetCounter label="Moves" used={used.moves} limit={budget?.moves ?? null} />
         </div>
       </div>
 
