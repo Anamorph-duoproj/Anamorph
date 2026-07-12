@@ -6,6 +6,7 @@ dist
 .vercel
 .netlify
 .claude/
+.vscode/
 *.log
 npm-debug.log*
 yarn-*.log*
