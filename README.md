@@ -13,7 +13,10 @@ line up and become walkable.
    The generator checks that the level can be solved.
 3. **Solve** - Drag to rotate the structure. When platforms line up, their
    path becomes active. Tap to move the figure across the currently active
-   paths until it reaches the goal.
+   paths until it reaches the goal. Each level has a rotation and move budget:
+   stay within it to win (challenges rate the run 1-3 stars for efficiency);
+   exceed it and you can retry. Custom sketches let you set your own budget or
+   play with no limit. Sound can be muted from the header.
 
 You can also load one of the example sketches and start from there. On your
 first visit, a short interactive tutorial walks you through these steps; it can
