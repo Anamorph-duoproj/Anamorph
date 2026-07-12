@@ -6,7 +6,7 @@ import {
   type Sketch,
   type Vec3,
 } from "./types.ts";
-import { viewDir, viewRight, viewUp, projectedDistance } from "./view.ts";
+import { projectToView, projectedDistance, viewDir, viewRight, viewUp } from "./view.ts";
 import { activeEdgesAtSnap, ACTIVE_TOLERANCE, START_SEPARATION } from "./anamorph.ts";
 import { adjacency, bfsPath, bfsDistances, planWalk } from "./pathfinding.ts";
 
@@ -51,8 +51,46 @@ export function validateSketch(sketch: Sketch): string | null {
 
 const add = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
 const scale = (a: Vec3, s: number): Vec3 => ({ x: a.x * s, y: a.y * s, z: a.z * s });
+const subtract = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const dist3 = (a: Vec3, b: Vec3) =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+function sketchPositions(sketch: Sketch, edges: [number, number][]): Vec3[] {
+  const shortestEdge = Math.min(
+    ...edges.map(([a, b]) =>
+      Math.hypot(
+        sketch.nodes[a].x - sketch.nodes[b].x,
+        sketch.nodes[a].y - sketch.nodes[b].y
+      )
+    )
+  );
+  const drawingScale = (START_SEPARATION + PLATFORM_SIZE * 0.45) / shortestEdge;
+  const right = viewRight(0);
+  const up = viewUp(0);
+
+  return sketch.nodes.map((node) =>
+    add(
+      scale(right, (node.x - 0.5) * drawingScale),
+      scale(up, (0.5 - node.y) * drawingScale)
+    )
+  );
+}
+
+function depthForSnap(baseDelta: Vec3, snap: number): { depth: number; residual: number } | null {
+  const projectedBase = projectToView(baseDelta, snap);
+  const projectedDepth = projectToView(viewDir(0), snap);
+  const denominator = projectedDepth.u ** 2 + projectedDepth.v ** 2;
+  if (denominator < 1e-7) return null;
+
+  const depth = -(
+    projectedBase.u * projectedDepth.u + projectedBase.v * projectedDepth.v
+  ) / denominator;
+  const residual = Math.hypot(
+    projectedBase.u + projectedDepth.u * depth,
+    projectedBase.v + projectedDepth.v * depth
+  );
+  return { depth, residual };
+}
 
 export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
   const invalid = validateSketch(sketch);
@@ -65,6 +103,7 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
   );
   const start = idToIndex.get(sketch.start!)!;
   const goal = idToIndex.get(sketch.goal!)!;
+  const basePositions = sketchPositions(sketch, edges);
 
   const adj: { to: number; edgeIdx: number }[][] = Array.from({ length: n }, () => []);
   edges.forEach(([a, b], i) => {
@@ -87,33 +126,36 @@ export function generateLevel(sketch: Sketch, baseSeed = 1): GenerateResult {
     }
   }
 
-  const MAX_ATTEMPTS = 300;
+  const MAX_ATTEMPTS = 180;
   let best: { level: Level; score: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const rng = mulberry32(baseSeed * 7919 + attempt * 104729 + 13);
-    const positions: Vec3[] = new Array(n);
+    const depths = new Array<number>(n).fill(Number.NaN);
     const edgeSnapHint = new Array<number>(edges.length).fill(-1);
-    positions[goal] = { x: 0, y: 0, z: 0 };
+    depths[goal] = 0;
 
     for (const { parent, child, edgeIdx } of treeOrder) {
-      const snap = 1 + Math.floor(rng() * (SNAP_COUNT - 1));
-      edgeSnapHint[edgeIdx] = snap;
+      const baseDelta = subtract(basePositions[child], basePositions[parent]);
+      const candidates = Array.from({ length: SNAP_COUNT - 1 }, (_, index) => index + 1)
+        .map((snap) => ({ snap, result: depthForSnap(baseDelta, snap) }))
+        .filter((candidate): candidate is { snap: number; result: { depth: number; residual: number } } =>
+          candidate.result !== null
+        )
+        .sort((a, b) => a.result.residual - b.result.residual);
 
-      const depth = (2.2 + rng() * 2.3) * (rng() < 0.5 ? -1 : 1);
-      const psi = (rng() - 0.5) * (Math.PI / 2.2) + (rng() < 0.5 ? 0 : Math.PI);
-      const mag = PLATFORM_SIZE * (1.0 + rng() * 0.25);
-      const r = viewRight(snap);
-      const u = viewUp(snap);
-      const offset = add(
-        scale(r, Math.cos(psi) * mag),
-        scale(u, Math.sin(psi) * mag)
+      const activeCandidates = candidates.filter(
+        (candidate) => candidate.result.residual < ACTIVE_TOLERANCE * 0.92
       );
-      positions[child] = add(
-        add(positions[parent], scale(viewDir(snap), depth)),
-        offset
-      );
+      const candidatePool = activeCandidates.length > 0 ? activeCandidates : candidates.slice(0, 1);
+      const selected = candidatePool[Math.floor(rng() * candidatePool.length)];
+      edgeSnapHint[edgeIdx] = selected.snap;
+      depths[child] = depths[parent] + selected.result.depth;
     }
+
+    const positions = basePositions.map((position, index) =>
+      add(position, scale(viewDir(0), depths[index]))
+    );
 
     const centroid = positions.reduce((acc, p) => add(acc, p), { x: 0, y: 0, z: 0 });
     const center = scale(centroid, 1 / n);

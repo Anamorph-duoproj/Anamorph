@@ -9,6 +9,7 @@ import {
 } from "../game/types";
 import { activeEdgesForCamera } from "../game/anamorph3d";
 import { adjacency, bfsDistances, planWalk } from "../game/pathfinding";
+import { projectToView } from "../game/view";
 
 interface Props {
   level: Level;
@@ -51,8 +52,6 @@ export default function GameScene({ level, onWin }: Props) {
     mount.appendChild(renderer.domElement);
     renderer.domElement.className = "touch-none";
 
-    const radius =
-      Math.max(2.5, ...level.positions.map((p) => Math.hypot(p.x, p.y, p.z))) + 2.6;
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
     let zoomPx = 1;
     const resize = () => {
@@ -60,6 +59,16 @@ export default function GameScene({ level, onWin }: Props) {
       const h = mount.clientHeight;
       renderer.setSize(w, h);
       const aspect = w / Math.max(1, h);
+      const margin = PLATFORM_SIZE * 1.4;
+      const radius = Math.max(
+        2.5,
+        ...Array.from({ length: SNAP_COUNT }, (_, snap) => {
+          const projected = level.positions.map((position) => projectToView(position, snap));
+          const horizontal = Math.max(...projected.map((point) => Math.abs(point.u))) + margin;
+          const vertical = Math.max(...projected.map((point) => Math.abs(point.v))) + margin;
+          return Math.max(vertical, horizontal / Math.max(0.25, aspect));
+        })
+      );
       camera.left = -radius * aspect;
       camera.right = radius * aspect;
       camera.top = radius;

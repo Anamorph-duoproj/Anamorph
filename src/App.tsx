@@ -1,7 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import SketchCanvas from "./components/SketchCanvas";
-import { CHALLENGES, type Challenge } from "./game/challenges";
-import { EXAMPLES } from "./game/examples";
+import {
+  CHALLENGES,
+  CHALLENGE_GROUPS,
+  type Challenge,
+  type ChallengeDifficulty,
+} from "./game/challenges";
 import { generateLevel, validateSketch } from "./game/generator";
 import {
   currentProfile,
@@ -24,7 +28,7 @@ const GameScene = lazy(() => import("./components/GameScene"));
 type Phase = "draw" | "morphing" | "play";
 
 const EMPTY_SKETCH: Sketch = { nodes: [], edges: [], start: null, goal: null };
-const TUTORIAL_KEY = "anamorph.tutorialDone";
+const TUTORIAL_KEY = "anamorph.tutorialDone.v2";
 const PROGRESS_KEY = "anamorph.challengeProgress.v1";
 const HISTORY_LIMIT = 64;
 
@@ -56,17 +60,100 @@ type Dialog =
   | { kind: "share"; url: string };
 
 const TUTORIAL_STEPS = [
-  "Tap the paper to place platforms. You need at least two.",
-  "Drag from one platform to another to draw a path.",
-  "Select the Start and Goal tools, then tap a platform to mark each.",
-  "Press \"Transform to 3D\". Then rotate the structure until paths line up and tap to walk.",
+  {
+    title: "Place platforms",
+    description: "Select Platform and tap the paper at least twice.",
+  },
+  {
+    title: "Connect the route",
+    description: "Select Path, then drag from one platform to another.",
+  },
+  {
+    title: "Mark start and goal",
+    description: "Choose Start and Goal, then tap one platform for each.",
+  },
+  {
+    title: "Transform your sketch",
+    description: "Press Transform to 3D. Your drawing will keep the same shape in the first view.",
+  },
+  {
+    title: "Find the hidden path",
+    description: "Rotate the 3D structure until a yellow path appears, then tap the scene to walk.",
+  },
 ];
 
-function tutorialStepFor(sketch: Sketch): number {
+function tutorialStepFor(sketch: Sketch, phase: Phase): number {
+  if (phase === "play") return 4;
+  if (phase === "morphing") return 3;
   if (sketch.nodes.length < 2) return 0;
   if (sketch.edges.length < 1) return 1;
   if (sketch.start === null || sketch.goal === null) return 2;
   return 3;
+}
+
+function TutorialDiagram({ step }: { step: number }) {
+  const is3d = step === 4;
+  return (
+    <div
+      className={`tutorial-diagram relative h-20 w-32 shrink-0 overflow-hidden rounded-lg border border-black/5 bg-[#faf6ee] ${
+        is3d ? "tutorial-diagram-3d" : ""
+      }`}
+      aria-hidden="true"
+    >
+      <span className="tutorial-line absolute left-[24px] top-[38px] h-1 w-[40px] origin-left rounded-full bg-[#c7bfe9]" />
+      <span className="tutorial-line absolute left-[63px] top-[38px] h-1 w-[40px] origin-left rotate-[-22deg] rounded-full bg-[#c7bfe9]" />
+      <span className="tutorial-node absolute left-4 top-7 h-6 w-6 rounded-full border-4 border-white bg-[#7ad3b2] shadow" />
+      <span className="tutorial-node absolute left-[54px] top-7 h-6 w-6 rounded-full border-4 border-white bg-[#b9aee8] shadow" />
+      <span className="tutorial-node absolute left-[94px] top-[19px] h-6 w-6 rounded-full border-4 border-white bg-[#f7998f] shadow" />
+      {step < 4 && (
+        <span className="tutorial-pointer absolute bottom-2 left-[42px] h-4 w-4 rotate-[-20deg] rounded-full border-2 border-[#4a4458]/70" />
+      )}
+    </div>
+  );
+}
+
+function TutorialPanel({
+  step,
+  onDismiss,
+  compact = false,
+}: {
+  step: number;
+  onDismiss: () => void;
+  compact?: boolean;
+}) {
+  const content = TUTORIAL_STEPS[step];
+  return (
+    <aside className="animate-fade-up flex w-full items-center gap-4 rounded-lg border border-white/80 bg-white/90 p-4 shadow-lg backdrop-blur">
+      {!compact && (
+        <div className="hidden sm:block">
+          <TutorialDiagram step={step} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase opacity-55">
+          <span>Tutorial</span>
+          <span>{step + 1}/{TUTORIAL_STEPS.length}</span>
+        </div>
+        <h2 className="text-lg font-semibold leading-tight">{content.title}</h2>
+        <p className="mt-1 text-sm leading-relaxed opacity-75">{content.description}</p>
+        <div className="mt-3 flex items-center gap-1.5" aria-hidden="true">
+          {TUTORIAL_STEPS.map((_, index) => (
+            <span
+              key={index}
+              className="h-1.5 flex-1 rounded-full"
+              style={{ backgroundColor: index <= step ? "#8d7bd8" : "rgba(74,68,88,0.13)" }}
+            />
+          ))}
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium opacity-60 transition hover:bg-white hover:opacity-100"
+      >
+        {step === TUTORIAL_STEPS.length - 1 ? "Done" : "Skip"}
+      </button>
+    </aside>
+  );
 }
 
 function loadProgress(profile: string | null): ChallengeProgress {
@@ -107,14 +194,14 @@ export default function App() {
   const [user, setUser] = useState<string | null>(() => currentProfile());
   const [dialog, setDialog] = useState<Dialog>({ kind: "none" });
   const [signInName, setSignInName] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
   const [saveName, setSaveName] = useState("");
   const [levelsVersion, setLevelsVersion] = useState(0);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+  const [activeDifficulty, setActiveDifficulty] = useState<ChallengeDifficulty>("easy");
   const [history, setHistory] = useState<SketchHistory>({
     past: [],
-    // First-time visitors start on a blank sheet so the tutorial can guide
-    // them through drawing; returning players get an example preloaded.
-    present: firstVisit.current ? EMPTY_SKETCH : EXAMPLES[0].sketch,
+    present: EMPTY_SKETCH,
     future: [],
   });
   const sketch = history.present;
@@ -236,27 +323,43 @@ export default function App() {
     setTutorialActive(true);
   };
 
-  const handleSignIn = () => {
-    const resolved = signIn(signInName);
-    if (!resolved) {
-      notice("Profile names are 1-24 letters, numbers, spaces, - or _.");
+  const handleSignIn = async () => {
+    const result = await signIn(signInName, signInPassword);
+    if (!result.ok) {
+      const message = {
+        "invalid-name": "Profile names are 1-24 letters, numbers, spaces, - or _.",
+        "invalid-password": "Use a password between 4 and 64 characters.",
+        "wrong-password": "That password does not match this profile.",
+      }[result.reason];
+      notice(message);
       return;
     }
-    setUser(resolved);
-    setProgress(loadProgress(resolved));
+    setUser(result.profile);
+    setProgress(loadProgress(result.profile));
     setSignInName("");
+    setSignInPassword("");
     setDialog({ kind: "none" });
-    notice(`Signed in as ${resolved}. Levels and progress are stored in this browser.`);
+    notice(
+      result.created
+        ? `Profile ${result.profile} created and signed in.`
+        : `Signed in as ${result.profile}.`
+    );
   };
 
   const handleSignOut = () => {
     signOut();
     setUser(null);
-    setProgress(loadProgress(null));
+    setProgress({});
+    setSignInPassword("");
     notice("Signed out. You are now playing as guest.");
   };
 
   const handleSaveLevel = () => {
+    if (!user) {
+      setDialog({ kind: "signin" });
+      notice("Sign in before saving a level.");
+      return;
+    }
     const name = saveName.trim().replace(/\s+/g, " ").slice(0, 40);
     if (!name) {
       notice("Give the level a name first.");
@@ -266,10 +369,15 @@ export default function App() {
     setLevelsVersion((v) => v + 1);
     setSaveName("");
     setDialog({ kind: "none" });
-    notice(`Level "${name}" saved${user ? ` for ${user}` : ""}.`);
+    notice(`Level "${name}" saved for ${user}.`);
   };
 
   const handleShare = async () => {
+    if (!user) {
+      setDialog({ kind: "signin" });
+      notice("Sign in before creating a share link.");
+      return;
+    }
     if (validation) {
       notice(validation);
       return;
@@ -290,10 +398,11 @@ export default function App() {
   };
 
   const validation = validateSketch(sketch);
-  const savedLevels = listLevels(user);
+  const savedLevels = user ? listLevels(user) : [];
   void levelsVersion; // reading it ties the list above to save/delete updates
   const activeChallenge = CHALLENGES.find((c) => c.id === activeChallengeId) ?? null;
   const completedCount = CHALLENGES.filter((c) => progress[c.id]?.completed).length;
+  const visibleChallenges = CHALLENGES.filter((c) => c.difficulty === activeDifficulty);
   const nextChallenge =
     activeChallenge === null
       ? null
@@ -301,6 +410,7 @@ export default function App() {
 
   const selectChallenge = useCallback(
     (challenge: Challenge) => {
+      setActiveDifficulty(challenge.difficulty);
       setActiveChallengeId(challenge.id);
       resetSketch(challenge.sketch);
       setWinStats(null);
@@ -326,7 +436,6 @@ export default function App() {
         setPhase("draw");
         return;
       }
-      if (tutorialActive) dismissTutorial();
       setLevel(result.level);
       setLevelKey((k) => k + 1);
       setWinStats(null);
@@ -349,7 +458,7 @@ export default function App() {
     setLevelKey((k) => k + 1);
   };
 
-  const tutorialStep = tutorialStepFor(sketch);
+  const tutorialStep = tutorialStepFor(sketch, phase);
 
   const completeRun = useCallback(
     (stats: SolveStats) => {
@@ -379,7 +488,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-8">
+      <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <img
             src="/assets/icon.webp"
@@ -392,7 +501,7 @@ export default function App() {
             className="brand-wordmark min-w-0 object-contain"
           />
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-sm">
+        <div className="flex w-full shrink-0 items-center justify-end gap-2 text-sm sm:w-auto sm:gap-3">
           <span className="hidden rounded-full bg-white/60 px-3 py-1 backdrop-blur sm:inline">
             Progress: {completedCount}/{CHALLENGES.length}
           </span>
@@ -401,10 +510,10 @@ export default function App() {
               Solved: {solved}
             </span>
           )}
-          {phase === "draw" && !tutorialActive && (
+          {phase !== "morphing" && (
             <button
               onClick={restartTutorial}
-              className="hidden rounded-full bg-white/70 px-4 py-1.5 font-medium shadow-sm backdrop-blur transition hover:bg-white md:inline"
+              className="rounded-lg bg-white/70 px-3 py-2 font-medium shadow-sm backdrop-blur transition hover:bg-white sm:px-4"
             >
               Tutorial
             </button>
@@ -418,8 +527,8 @@ export default function App() {
             </button>
           )}
           {user ? (
-            <span className="flex items-center gap-2 rounded-full bg-white/70 py-1 pl-3 pr-1 shadow-sm backdrop-blur">
-              <span className="max-w-28 truncate font-medium">{user}</span>
+            <span className="flex items-center gap-2 rounded-full bg-white/70 py-1 pl-1 pr-1 shadow-sm backdrop-blur sm:pl-3">
+              <span className="hidden max-w-28 truncate font-medium sm:inline">{user}</span>
               <button
                 onClick={handleSignOut}
                 className="rounded-full bg-white px-3 py-1 text-xs font-medium transition hover:shadow"
@@ -441,44 +550,16 @@ export default function App() {
 
       <main className="relative min-h-0 flex-1">
         {phase === "draw" && (
-          <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 px-4 pb-4 sm:px-6">
+          <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 overflow-y-auto px-4 pb-4 sm:px-6">
             {tutorialActive && (
-              <div className="animate-fade-up flex items-center gap-3 rounded-2xl bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
-                <div className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
-                  {TUTORIAL_STEPS.map((_, i) => (
-                    <span
-                      key={i}
-                      className="h-2 w-2 rounded-full transition-colors"
-                      style={{
-                        backgroundColor: i < tutorialStep
-                          ? "#7ad3b2"
-                          : i === tutorialStep
-                            ? "#8d7bd8"
-                            : "rgba(74,68,88,0.18)",
-                      }}
-                    />
-                  ))}
-                </div>
-                <p className="min-w-0 flex-1 text-sm">
-                  <span className="font-semibold">
-                    Step {tutorialStep + 1}/{TUTORIAL_STEPS.length}:
-                  </span>{" "}
-                  {TUTORIAL_STEPS[tutorialStep]}
-                </p>
-                <button
-                  onClick={dismissTutorial}
-                  className="shrink-0 rounded-full px-3 py-1.5 text-sm font-medium opacity-60 transition hover:bg-white hover:opacity-100"
-                >
-                  Skip
-                </button>
-              </div>
+              <TutorialPanel step={tutorialStep} onDismiss={dismissTutorial} />
             )}
-            <section className="animate-fade-up rounded-2xl bg-white/55 p-3 shadow-sm backdrop-blur">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <section className="animate-fade-up rounded-lg border border-white/70 bg-white/55 p-3 shadow-sm backdrop-blur">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold">Challenges</h2>
+                  <h2 className="text-base font-semibold">Challenges</h2>
                   <p className="text-xs opacity-60">
-                    Complete fixed sketches and improve your best moves and rotations.
+                    40 levels across four difficulty categories.
                   </p>
                 </div>
                 {activeChallenge && (
@@ -487,34 +568,63 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                {CHALLENGES.map((challenge) => {
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {CHALLENGE_GROUPS.map((group) => {
+                  const groupChallenges = CHALLENGES.filter((c) => c.difficulty === group.id);
+                  const groupDone = groupChallenges.filter((c) => progress[c.id]?.completed).length;
+                  const selected = activeDifficulty === group.id;
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => setActiveDifficulty(group.id)}
+                      className={`min-h-14 rounded-lg border px-3 py-2 text-left transition ${
+                        selected ? "bg-white shadow-sm" : "border-transparent bg-white/35 hover:bg-white/65"
+                      }`}
+                      style={selected ? { borderColor: group.color } : undefined}
+                    >
+                      <span className="flex items-center justify-between gap-2 text-sm font-semibold">
+                        {group.label}
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[11px]"
+                          style={{ color: group.color, backgroundColor: group.softColor }}
+                        >
+                          {groupDone}/10
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid auto-cols-[minmax(190px,1fr)] grid-flow-col gap-2 overflow-x-auto pb-1">
+                {visibleChallenges.map((challenge, index) => {
                   const entry = progress[challenge.id];
                   const active = activeChallengeId === challenge.id;
+                  const group = CHALLENGE_GROUPS.find((item) => item.id === challenge.difficulty)!;
                   return (
                     <button
                       key={challenge.id}
                       onClick={() => selectChallenge(challenge)}
-                      className={`min-h-28 rounded-2xl border bg-white/65 p-3 text-left text-sm shadow-sm transition hover:-translate-y-0.5 hover:bg-white ${
-                        active ? "border-[#8d7bd8] ring-2 ring-[#8d7bd8]/20" : "border-white/60"
+                      className={`min-h-20 rounded-lg border bg-white/65 p-3 text-left text-sm shadow-sm transition hover:-translate-y-0.5 hover:bg-white ${
+                        active ? "ring-2 ring-black/10" : "border-white/60"
                       }`}
+                      style={active ? { borderColor: group.color } : undefined}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold">{challenge.title}</span>
+                        <span className="font-semibold">{String(index + 1).padStart(2, "0")}. {challenge.title}</span>
                         <span
                           className="rounded-full px-2 py-0.5 text-[11px]"
                           style={{
-                            backgroundColor: entry?.completed ? "#dff6ed" : "#f1edf7",
-                            color: entry?.completed ? "#25785e" : "#6b5f8f",
+                            backgroundColor: entry?.completed ? "#dff6ed" : group.softColor,
+                            color: entry?.completed ? "#25785e" : group.color,
                           }}
                         >
-                          {entry?.completed ? "Done" : challenge.difficulty}
+                          {entry?.completed ? "Done" : group.label}
                         </span>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs opacity-65">
+                      <p className="mt-1 line-clamp-1 text-xs opacity-65">
                         {challenge.description}
                       </p>
-                      <p className="mt-2 text-xs opacity-70">
+                      <p className="mt-1 text-xs opacity-70">
                         Target: {challenge.target.moves} moves / {challenge.target.rotations} rotations
                       </p>
                       {entry && (
@@ -527,52 +637,51 @@ export default function App() {
                 })}
               </div>
             </section>
-            <SketchCanvas
-              sketch={sketch}
-              onChange={editSketch}
-              onNotice={notice}
-              onUndo={undo}
-              onRedo={redo}
-              canUndo={history.past.length > 0}
-              canRedo={history.future.length > 0}
-            />
+            <div className="min-h-[420px] flex-1 sm:min-h-[300px]">
+              <SketchCanvas
+                sketch={sketch}
+                onChange={editSketch}
+                onNotice={notice}
+                onUndo={undo}
+                onRedo={redo}
+                canUndo={history.past.length > 0}
+                canRedo={history.future.length > 0}
+              />
+            </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm opacity-60">Examples:</span>
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex.name}
-                  title={ex.description}
-                  onClick={() => {
-                    setActiveChallengeId(null);
-                    resetSketch(ex.sketch);
-                  }}
-                  className="rounded-full bg-white/70 px-3 py-1.5 text-sm transition hover:bg-white"
-                >
-                  {ex.name}
-                </button>
-              ))}
-              <span className="mx-1 h-6 w-px bg-black/10" aria-hidden="true" />
               <button
                 onClick={() => {
+                  if (!user) {
+                    setDialog({ kind: "signin" });
+                    notice("Sign in before saving a level.");
+                    return;
+                  }
                   setSaveName("");
                   setDialog({ kind: "save" });
                 }}
                 disabled={sketch.nodes.length === 0}
-                className="rounded-full bg-white/70 px-3 py-1.5 text-sm font-medium transition hover:bg-white disabled:opacity-40"
+                className="rounded-lg bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white disabled:opacity-40"
               >
-                Save level
+                {user ? "Save level" : "Sign in to save"}
               </button>
               <button
-                onClick={() => setDialog({ kind: "levels" })}
-                className="rounded-full bg-white/70 px-3 py-1.5 text-sm font-medium transition hover:bg-white"
+                onClick={() => {
+                  if (!user) {
+                    setDialog({ kind: "signin" });
+                    notice("Sign in to open your saved levels.");
+                    return;
+                  }
+                  setDialog({ kind: "levels" });
+                }}
+                className="rounded-lg bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white"
               >
-                My levels{savedLevels.length > 0 ? ` (${savedLevels.length})` : ""}
+                {user ? `My levels${savedLevels.length > 0 ? ` (${savedLevels.length})` : ""}` : "My levels"}
               </button>
               <button
                 onClick={handleShare}
-                className="rounded-full bg-white/70 px-3 py-1.5 text-sm font-medium transition hover:bg-white"
+                className="rounded-lg bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white"
               >
-                Share link
+                {user ? "Share link" : "Sign in to share"}
               </button>
               <button
                 onClick={transform}
@@ -596,12 +705,28 @@ export default function App() {
           </div>
         )}
 
-        {phase === "morphing" && <MorphingScreen />}
+        {phase === "morphing" && (
+          <div className="relative h-full">
+            <MorphingScreen />
+            {tutorialActive && (
+              <div className="absolute inset-x-4 top-4 z-10 mx-auto max-w-xl">
+                <TutorialPanel step={tutorialStep} onDismiss={dismissTutorial} compact />
+              </div>
+            )}
+          </div>
+        )}
 
         {phase === "play" && level && (
-          <Suspense fallback={<MorphingScreen />}>
-            <GameScene key={levelKey} level={level} onWin={completeRun} />
-          </Suspense>
+          <>
+            <Suspense fallback={<MorphingScreen />}>
+              <GameScene key={levelKey} level={level} onWin={completeRun} />
+            </Suspense>
+            {tutorialActive && !winStats && (
+              <div className="absolute left-4 top-16 z-10 w-[min(26rem,calc(100%-2rem))]">
+                <TutorialPanel step={tutorialStep} onDismiss={dismissTutorial} />
+              </div>
+            )}
+          </>
         )}
 
         {winStats && (
@@ -669,8 +794,8 @@ export default function App() {
                   <div>
                     <h2 className="text-lg font-semibold">Sign in</h2>
                     <p className="mt-1 text-xs opacity-60">
-                      Local profile without a password. Your levels and challenge progress
-                      are stored only in this browser.
+                      Enter an existing profile or choose a new name to create one. Passwords,
+                      levels, and progress stay in this browser.
                     </p>
                   </div>
                   <input
@@ -682,13 +807,24 @@ export default function App() {
                     maxLength={24}
                     className="rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none focus:border-[#8d7bd8]"
                   />
+                  <input
+                    type="password"
+                    value={signInPassword}
+                    onChange={(e) => setSignInPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSignIn()}
+                    placeholder="Password (at least 4 characters)"
+                    minLength={4}
+                    maxLength={64}
+                    autoComplete="current-password"
+                    className="rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none focus:border-[#8d7bd8]"
+                  />
                   {listProfiles().length > 0 && (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs opacity-60">Existing:</span>
                       {listProfiles().map((p) => (
                         <button
                           key={p}
-                          onClick={() => setSignInName(p)}
+                      onClick={() => setSignInName(p)}
                           className="rounded-full bg-white px-3 py-1 text-xs font-medium shadow-sm transition hover:shadow"
                         >
                           {p}
@@ -719,8 +855,8 @@ export default function App() {
                   <div>
                     <h2 className="text-lg font-semibold">Save level</h2>
                     <p className="mt-1 text-xs opacity-60">
-                      Saved {user ? `for ${user}` : "as guest"} in this browser. Saving with
-                      an existing name replaces that level.
+                      Saved for {user} in this browser. Saving with an existing name replaces
+                      that level.
                     </p>
                   </div>
                   <input
@@ -754,7 +890,7 @@ export default function App() {
                 <>
                   <div>
                     <h2 className="text-lg font-semibold">
-                      My levels {user ? `- ${user}` : "- guest"}
+                      My levels - {user}
                     </h2>
                     <p className="mt-1 text-xs opacity-60">
                       {savedLevels.length === 0
