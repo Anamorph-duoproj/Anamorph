@@ -29,6 +29,7 @@ type Phase = "draw" | "morphing" | "play";
 
 const EMPTY_SKETCH: Sketch = { nodes: [], edges: [], start: null, goal: null };
 const TUTORIAL_KEY = "anamorph.tutorialDone.v2";
+const CHALLENGES_OPEN_KEY = "anamorph.challengesOpen";
 const PROGRESS_KEY = "anamorph.challengeProgress.v1";
 const HISTORY_LIMIT = 64;
 
@@ -62,11 +63,11 @@ type Dialog =
 const TUTORIAL_STEPS = [
   {
     title: "Place platforms",
-    description: "Select Platform and tap the paper at least twice.",
+    description: "Select the Draw tool and tap the paper at least twice.",
   },
   {
     title: "Connect the route",
-    description: "Select Path, then drag from one platform to another.",
+    description: "Still in Draw, drag from one platform to another.",
   },
   {
     title: "Mark start and goal",
@@ -199,6 +200,14 @@ export default function App() {
   const [levelsVersion, setLevelsVersion] = useState(0);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
   const [activeDifficulty, setActiveDifficulty] = useState<ChallengeDifficulty>("easy");
+  // Collapsed by default so the sketch canvas gets the vertical space.
+  const [challengesOpen, setChallengesOpen] = useState(
+    () => localStorage.getItem(CHALLENGES_OPEN_KEY) === "1"
+  );
+  const setChallengesPanel = (open: boolean) => {
+    localStorage.setItem(CHALLENGES_OPEN_KEY, open ? "1" : "0");
+    setChallengesOpen(open);
+  };
   const [history, setHistory] = useState<SketchHistory>({
     past: [],
     present: EMPTY_SKETCH,
@@ -416,6 +425,9 @@ export default function App() {
       setWinStats(null);
       setLevel(null);
       setPhase("draw");
+      // Give the loaded sketch the space back.
+      localStorage.setItem(CHALLENGES_OPEN_KEY, "0");
+      setChallengesOpen(false);
       notice(`${challenge.title} challenge loaded.`);
     },
     [notice, resetSketch]
@@ -550,52 +562,64 @@ export default function App() {
 
       <main className="relative min-h-0 flex-1">
         {phase === "draw" && (
-          <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 overflow-y-auto px-4 pb-4 sm:px-6">
+          <div className="mx-auto flex h-full max-w-6xl flex-col gap-3 overflow-y-auto px-4 pb-4 sm:px-6">
             {tutorialActive && (
               <TutorialPanel step={tutorialStep} onDismiss={dismissTutorial} />
             )}
-            <section className="animate-fade-up rounded-lg border border-white/70 bg-white/55 p-3 shadow-sm backdrop-blur">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold">Challenges</h2>
-                  <p className="text-xs opacity-60">
-                    40 levels across four difficulty categories.
-                  </p>
-                </div>
+            <section className="animate-fade-up rounded-lg border border-white/70 bg-white/55 shadow-sm backdrop-blur">
+              <button
+                onClick={() => setChallengesPanel(!challengesOpen)}
+                aria-expanded={challengesOpen}
+                className="flex w-full flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-white/40"
+              >
+                <h2 className="text-sm font-semibold">Challenges</h2>
+                <span className="rounded-full bg-white/75 px-2.5 py-0.5 text-xs font-medium">
+                  {completedCount}/{CHALLENGES.length} done
+                </span>
                 {activeChallenge && (
-                  <span className="rounded-full bg-white/75 px-3 py-1 text-xs font-medium">
+                  <span className="rounded-full bg-white/75 px-2.5 py-0.5 text-xs font-medium">
                     Active: {activeChallenge.title}
                   </span>
                 )}
-              </div>
-              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {CHALLENGE_GROUPS.map((group) => {
-                  const groupChallenges = CHALLENGES.filter((c) => c.difficulty === group.id);
-                  const groupDone = groupChallenges.filter((c) => progress[c.id]?.completed).length;
-                  const selected = activeDifficulty === group.id;
-                  return (
-                    <button
-                      key={group.id}
-                      onClick={() => setActiveDifficulty(group.id)}
-                      className={`min-h-14 rounded-lg border px-3 py-2 text-left transition ${
-                        selected ? "bg-white shadow-sm" : "border-transparent bg-white/35 hover:bg-white/65"
-                      }`}
-                      style={selected ? { borderColor: group.color } : undefined}
-                    >
-                      <span className="flex items-center justify-between gap-2 text-sm font-semibold">
-                        {group.label}
-                        <span
-                          className="rounded-full px-2 py-0.5 text-[11px]"
-                          style={{ color: group.color, backgroundColor: group.softColor }}
+                <span className="ml-auto flex items-center gap-1 text-xs font-medium opacity-60">
+                  {challengesOpen ? "Hide" : "Browse"}
+                  <span
+                    className="inline-block transition-transform"
+                    style={{ transform: challengesOpen ? "rotate(180deg)" : "none" }}
+                    aria-hidden="true"
+                  >
+                    &#9662;
+                  </span>
+                </span>
+              </button>
+              {challengesOpen && (
+                <div className="px-3 pb-3">
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {CHALLENGE_GROUPS.map((group) => {
+                      const groupChallenges = CHALLENGES.filter((c) => c.difficulty === group.id);
+                      const groupDone = groupChallenges.filter((c) => progress[c.id]?.completed).length;
+                      const selected = activeDifficulty === group.id;
+                      return (
+                        <button
+                          key={group.id}
+                          onClick={() => setActiveDifficulty(group.id)}
+                          className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                            selected ? "bg-white shadow-sm" : "border-transparent bg-white/35 hover:bg-white/65"
+                          }`}
+                          style={selected ? { borderColor: group.color } : undefined}
                         >
-                          {groupDone}/10
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="grid auto-cols-[minmax(190px,1fr)] grid-flow-col gap-2 overflow-x-auto pb-1">
+                          {group.label}
+                          <span
+                            className="rounded-full px-1.5 py-0.5 text-[11px]"
+                            style={{ color: group.color, backgroundColor: group.softColor }}
+                          >
+                            {groupDone}/10
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="grid auto-cols-[minmax(180px,1fr)] grid-flow-col gap-2 overflow-x-auto pb-1">
                 {visibleChallenges.map((challenge, index) => {
                   const entry = progress[challenge.id];
                   const active = activeChallengeId === challenge.id;
@@ -635,9 +659,11 @@ export default function App() {
                     </button>
                   );
                 })}
-              </div>
+                  </div>
+                </div>
+              )}
             </section>
-            <div className="min-h-[420px] flex-1 sm:min-h-[300px]">
+            <div className="min-h-[420px] flex-1 sm:min-h-[380px]">
               <SketchCanvas
                 sketch={sketch}
                 onChange={editSketch}
